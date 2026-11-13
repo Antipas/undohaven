@@ -1,0 +1,6 @@
+# Third-party session-log gate. Not part of the dsh distribution.
+- id: log-gate
+  name: dsh-log-gate
+  config:
+    mode: all
+    rules: []

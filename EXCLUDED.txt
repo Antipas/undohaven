@@ -1,0 +1,10 @@
+Excluded from this public export:
+
+- packages/server (Cloudflare Worker, billing, admin routes, page source)
+- wrangler.toml (account id, zone id, D1 id, R2 bucket)
+- scripts/deploy.sh and scripts/stripe-setup.mjs
+- the private monorepo lockfile and GitHub Actions workflow
+- deploy metadata and any Stripe secrets (none are in this tree)
+
+Included on purpose: client source, tests, READMEs, MIT license, CONTRIBUTING.
+The owner token is the placeholder OWNER.

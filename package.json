@@ -1,0 +1,10 @@
+{
+  "name": "undohaven-public",
+  "private": true,
+  "type": "module",
+  "version": "0.1.1",
+  "description": "Unofficial third-party client for encrypted dsh snapshots.",
+  "workspaces": ["packages/*"],
+  "license": "MIT",
+  "engines": { "node": ">=24.9.0" }
+}

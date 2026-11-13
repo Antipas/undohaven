@@ -1,0 +1,52 @@
+{
+  "name": "dsh-log-gate",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "Unofficial third-party gate for dsh session-log upload.",
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "bin": {
+    "dsh-log-gate": "./bin/dsh-log-gate.js"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.19.0"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "session-log",
+    "privacy",
+    "telemetry",
+    "unofficial"
+  ],
+  "license": "MIT",
+  "homepage": "https://undohaven.com/log-gate",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/undohaven.git",
+    "directory": "packages/log-gate"
+  },
+  "bugs": {
+    "url": "https://github.com/OWNER/undohaven/issues",
+    "email": "support@undohaven.com"
+  }
+}

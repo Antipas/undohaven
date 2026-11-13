@@ -1,0 +1,38 @@
+{
+  "name": "undohaven-core",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "Snapshot, encryption, and restore engine for UndoHaven.",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "hash-wasm": "4.13.0"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "backup",
+    "snapshot",
+    "rollback",
+    "restore",
+    "encryption",
+    "e2ee",
+    "agent"
+  ],
+  "license": "MIT",
+  "homepage": "https://undohaven.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/undohaven.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/OWNER/undohaven/issues",
+    "email": "support@undohaven.com"
+  }
+}
