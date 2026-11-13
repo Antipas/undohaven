@@ -43,11 +43,11 @@
   "homepage": "https://undohaven.com/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/undohaven.git",
+    "url": "git+https://github.com/Antipas/undohaven.git",
     "directory": "packages/plugin"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/undohaven/issues",
+    "url": "https://github.com/Antipas/undohaven/issues",
     "email": "support@undohaven.com"
   }
 }

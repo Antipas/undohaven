@@ -42,11 +42,11 @@
   "homepage": "https://undohaven.com/log-gate",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/undohaven.git",
+    "url": "git+https://github.com/Antipas/undohaven.git",
     "directory": "packages/log-gate"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/undohaven/issues",
+    "url": "https://github.com/Antipas/undohaven/issues",
     "email": "support@undohaven.com"
   }
 }

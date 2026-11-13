@@ -9,6 +9,6 @@ This export is the public client:
 - `packages/plugin` publishes as `dsh-undohaven`
 - `packages/log-gate` publishes as `dsh-log-gate`
 
-The GitHub owner is the placeholder `OWNER` in `repo.config.json`. Fill that in before publishing. npm reads `repository` from each package.json, which currently uses the same placeholder.
+Source: https://github.com/Antipas/undohaven. npm package `repository` fields point at this repo.
 
 Homepage: https://undohaven.com/
