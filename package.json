@@ -2,9 +2,57 @@
   "name": "undohaven-public",
   "private": true,
   "type": "module",
-  "version": "0.1.1",
-  "description": "Unofficial third-party client for encrypted dsh snapshots.",
-  "workspaces": ["packages/*"],
+  "version": "0.1.6",
+  "description": "Unofficial third-party encrypted snapshots, rollback, and machine migration for dsh. Compatible with dsh. Not affiliated with DeepSeek.",
+  "workspaces": [
+    "packages/*"
+  ],
   "license": "MIT",
-  "engines": { "node": ">=24.9.0" }
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "main": "./packages/plugin/index.js",
+  "exports": {
+    ".": "./packages/plugin/index.js",
+    "./client": "./packages/plugin/client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.19.0",
+    "undohaven-core": "file:packages/core"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 packages/core/test/*.test.js packages/plugin/test/*.test.js packages/log-gate/test/*.test.js"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "dsh-plugins",
+    "dsh-bundle",
+    "backup",
+    "snapshot",
+    "rollback",
+    "restore",
+    "encryption"
+  ],
+  "homepage": "https://undohaven.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Antipas/undohaven.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Antipas/undohaven/issues",
+    "email": "support@undohaven.com"
+  }
 }

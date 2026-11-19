@@ -52,36 +52,35 @@ function log(ctx, message) {
   if (typeof ctx?.logger?.info === 'function') ctx.logger.info(message)
 }
 
-function send(res, status, body) {
-  const payload = Buffer.from(JSON.stringify(body))
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'content-length': payload.length,
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })
-  res.end(payload)
 }
 
-export function mount(webServer, ctx, config) {
-  return webServer.register({
-    kind: 'prefix',
-    path: '/api/log-gate',
-    async handler(req, res) {
-      const address = req.socket?.remoteAddress || ''
-      if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1') {
-        send(res, 403, { error: 'loopback' })
-        return
-      }
-      const url = new URL(req.url || '/', 'http://127.0.0.1')
-      if (req.method === 'GET' && (url.pathname === '/api/log-gate/status' || url.pathname === '/status')) {
-        const live = typeof ctx.sessions?.list === 'function' ? ctx.sessions.list() : []
-        const rows = classifyLive(live, config)
-        send(res, 200, { ...currentRules(config), sessions: rows, message: statusMessage(rows, config) })
-        return
-      }
-      send(res, 404, { error: 'not_found' })
+/**
+ * Register on connection.fetch. dsh 0.2.2-rc.4 admits that route inside the
+ * shared /api handler (Host/Origin, then the Peer) before fetch runs.
+ * A webServer.register route on the same prefix can be dispatched first and
+ * skip that admission. Missing fetch.register mounts nothing.
+ */
+export function mount(connection, ctx, config) {
+  if (typeof connection?.fetch?.register !== 'function') return () => {}
+  const stop = connection.fetch.register({
+    path: '/api/log-gate/status',
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async () => {
+      const live = typeof ctx.sessions?.list === 'function' ? ctx.sessions.list() : []
+      const rows = classifyLive(live, config)
+      return jsonResponse(200, { ...currentRules(config), sessions: rows, message: statusMessage(rows, config) })
     },
   })
+  return () => {
+    const result = stop?.()
+    if (result && typeof result.then === 'function') result.catch(() => {})
+  }
 }
 
 export function apply(ctx, config = {}) {
@@ -94,14 +93,14 @@ export function apply(ctx, config = {}) {
   log(ctx, statusMessage(rows, config))
   let unmount = () => {}
   const attach = (host) => {
-    if (host?.webServer?.register) unmount = mount(host.webServer, host, config) || (() => {})
+    if (typeof host?.connection?.fetch?.register === 'function') unmount = mount(host.connection, host, config) || (() => {})
   }
-  if (ctx.webServer?.register) attach(ctx)
+  if (typeof ctx.connection?.fetch?.register === 'function') attach(ctx)
   else if (typeof ctx.inject === 'function') {
     try {
-      ctx.inject(['webServer'], (child) => { attach(child) })
+      ctx.inject(['connection'], (child) => { attach(child) })
     } catch {
-      /* settings UI is optional */
+      /* the status route is optional */
     }
   }
   return () => {

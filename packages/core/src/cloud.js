@@ -124,4 +124,16 @@ export class CloudClient {
   startTrial() {
     return this.request('POST', '/v1/trial', { body: {} }).then((res) => res.body)
   }
+
+  createS3Key(body) {
+    return this.request('POST', '/v1/s3/keys', { body }).then((res) => res.body)
+  }
+
+  listS3Keys() {
+    return this.request('GET', '/v1/s3/keys').then((res) => res.body.keys)
+  }
+
+  revokeS3Key(id) {
+    return this.request('POST', `/v1/s3/keys/${encodeURIComponent(id)}/revoke`, { body: {} }).then((res) => res.body)
+  }
 }

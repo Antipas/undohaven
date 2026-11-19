@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { newDeviceLabel } from 'undohaven-core'
 import {
   CloudClient,
@@ -11,7 +11,9 @@ import {
   exportArchive,
   UPGRADE,
   readPrompts,
+  readSnapshotRecord,
   reportAnonymousEvent,
+  showLimitNudge,
   writePrompts,
   importArchive,
   listSnapshots,
@@ -30,6 +32,12 @@ import {
   restoreSnapshot,
   rotatePassphrase,
   saveConfig,
+  collectPluginState,
+  diffPluginState,
+  installProfile,
+  loadPluginState,
+  restorePluginState,
+  savePluginState,
   saveKeyFile,
   unlockPassphrase,
   upgradeRuntime,
@@ -221,6 +229,10 @@ async function cmdSnapshot(ctx, flags) {
     env: ctx.env,
   })
   await reportAnonymousEvent(ctx.dataDir, 'first_snapshot', null, ctx.env).catch(() => {})
+  if (snap.plan === 'free' && Number(snap.pruned) > 0) {
+    const nudge = await showLimitNudge(ctx.dataDir, 'history', ctx.env)
+    if (nudge.shown) console.error(nudge.line)
+  }
   if (snap.cloudError) {
     const message = snap.cloudError instanceof Error ? snap.cloudError.message : String(snap.cloudError)
     if (/quota|容量/.test(message)) await reportAnonymousEvent(ctx.dataDir, 'limit_hit', { reason: 'snapshot' }, ctx.env).catch(() => {})
@@ -335,8 +347,8 @@ async function cmdLogin(ctx, flags) {
     } catch (error) {
       if (error.code === 'authorization_pending') continue
       if (error.code === 'device_limit') {
-        await maybePrompt(ctx, 'device')
-        await reportAnonymousEvent(ctx.dataDir, 'limit_hit', { reason: 'device' }, ctx.env).catch(() => {})
+        const nudge = await showLimitNudge(ctx.dataDir, 'device', ctx.env)
+        if (nudge.shown) console.error(nudge.line)
         throw error
       }
       if (error.code === 'slow_down') {
@@ -547,6 +559,31 @@ async function cmdStorage(ctx, flags, positionals) {
   throw new HouhuiError('bad_storage', '用法：storage show | reset | set dir | set s3', 'Usage: storage show, reset, set dir, or set s3')
 }
 
+async function cmdInit(ctx) {
+  const dek = await ensureDek(ctx)
+  const { cloud } = await cloudFor(ctx)
+  const snap = await createSnapshot({
+    dataDir: ctx.dataDir,
+    dshHome: ctx.dshHome,
+    agentsHome: ctx.agentsHome,
+    kind: 'manual',
+    tags: ['init'],
+    dek,
+    cloud,
+    env: ctx.env,
+  })
+  await reportAnonymousEvent(ctx.dataDir, 'first_snapshot', null, ctx.env).catch(() => {})
+  emit(ctx, {
+    text: bi(
+      `已安装。第一份快照 ${snap.id}。回滚：undohaven restore --to ${snap.id}`,
+      `Installed. First snapshot ${snap.id}. Roll back: undohaven restore --to ${snap.id}`,
+    ),
+    id: snap.id,
+    cloud: !!snap.cloud,
+  })
+  return snap.cloudError ? 1 : 0
+}
+
 async function cmdFunnel(ctx, positionals) {
   const config = await loadConfig(ctx.dataDir)
   const action = positionals[0] || 'status'
@@ -566,6 +603,75 @@ async function cmdFunnel(ctx, positionals) {
   return 0
 }
 
+async function cmdPlugins(ctx, flags, positionals) {
+  const action = positionals[0] || 'snapshot'
+  if (action === 'snapshot') {
+    const state = await collectPluginState(ctx.dshHome)
+    await savePluginState(ctx.dataDir, state)
+    const count = Object.values(state.profiles).reduce((sum, profile) => sum + Object.keys(profile.dependencies).length, 0)
+    emit(ctx, {
+      text: bi(`已记下 ${count} 个插件包。`, `Recorded ${count} plugin package${count === 1 ? '' : 's'}.`),
+      profiles: Object.keys(state.profiles),
+      packages: count,
+    })
+    return 0
+  }
+  if (action === 'diff' || action === 'restore') {
+    const saved = flags.from
+      ? (await readSnapshotRecord(ctx.dataDir, flags.from))?.plugins
+      : await loadPluginState(ctx.dataDir)
+    if (!saved) throw new HouhuiError('no_plugin_state', '还没有插件快照。', 'No plugin snapshot yet.')
+    const current = await collectPluginState(ctx.dshHome)
+    const diff = diffPluginState(saved, current)
+    if (action === 'diff') {
+      emit(ctx, { text: JSON.stringify(diff.profiles, null, 2), ...diff })
+      return 0
+    }
+    const changed = await restorePluginState(ctx.dshHome, saved)
+    const installs = []
+    if (flags.install) {
+      for (const name of changed) installs.push({ profile: name, ...(await installProfile(join(ctx.dshHome, 'profiles', name), ctx.env)) })
+    }
+    emit(ctx, {
+      text: bi(`已写回 ${changed.join(', ') || '没有 profile'}。`, `Wrote ${changed.join(', ') || 'no profiles'}.`),
+      profiles: changed,
+      installs,
+    })
+    return 0
+  }
+  throw new HouhuiError('bad_plugins', '用法：undohaven plugins snapshot|restore|diff', 'Usage: undohaven plugins snapshot, restore, or diff')
+}
+
+async function cmdS3Keys(ctx, flags, positionals) {
+  const { cloud } = await cloudFor(ctx)
+  if (!cloud) throw new HouhuiError('login_required', '请先登录', 'Log in first')
+  const action = positionals[0] === 'keys' ? positionals[1] : positionals[0]
+  if (action === 'list') {
+    const keys = await cloud.listS3Keys()
+    emit(ctx, { text: keys.map((key) => `${key.accessKeyId} ${key.bucket} ${key.status}`).join('\n') || bi('还没有密钥', 'No keys yet'), keys })
+    return 0
+  }
+  if (action === 'revoke') {
+    const id = positionals[positionals[0] === 'keys' ? 2 : 1]
+    if (!id) throw new HouhuiError('need_key', '用法：undohaven s3 keys revoke <id>', 'Usage: undohaven s3 keys revoke <id>')
+    await cloud.revokeS3Key(id)
+    emit(ctx, { text: bi(`已撤销 ${id}`, `Revoked ${id}`), ok: true, accessKeyId: id })
+    return 0
+  }
+  if (action === 'create') {
+    const created = await cloud.createS3Key({ label: flags.label || '', bucket: flags.bucket || 'undohaven' })
+    emit(ctx, {
+      text: bi(
+        `密钥只显示这一次。\nendpoint https://s3.undohaven.com\nbucket ${created.bucket}\naccess ${created.accessKeyId}\nsecret ${created.secretAccessKey}`,
+        `The secret is shown once.\nendpoint https://s3.undohaven.com\nbucket ${created.bucket}\naccess ${created.accessKeyId}\nsecret ${created.secretAccessKey}`,
+      ),
+      ...created,
+    })
+    return 0
+  }
+  throw new HouhuiError('bad_s3', '用法：undohaven s3 keys create|list|revoke', 'Usage: undohaven s3 keys create, list, or revoke')
+}
+
 async function cmdTrial(ctx) {
   const { cloud } = await cloudFor(ctx)
   if (!cloud) throw new HouhuiError('login_required', '请先登录', 'Log in first')
@@ -580,6 +686,7 @@ function help() {
     'Unofficial third-party tool compatible with dsh. Losing both passphrase and recovery code = unrecoverable.',
     '默认只在本机做加密快照，不需要登录。 / Default is an encrypted local snapshot. No login.',
     '',
+    'undohaven init',
     'undohaven doctor',
     'undohaven snapshot [--include-credentials] [--tag name]',
     'undohaven list',
@@ -589,6 +696,8 @@ function help() {
     'undohaven trial',
     'undohaven funnel on|off|status',
     'undohaven storage show | reset | set dir <path> | set s3 --endpoint --bucket --access-key-id',
+    'undohaven s3 keys create|list|revoke',
+    'undohaven plugins snapshot|restore|diff',
     'undohaven migrate-machine --to <id>',
     'undohaven upgrade <version>',
     'undohaven export --local <file>',
@@ -607,6 +716,7 @@ export async function main(argv = process.argv) {
     const ctx = context(flags)
     if (command === 'funnel') return await cmdFunnel(ctx, positionals)
     await reportAnonymousEvent(ctx.dataDir, 'install', null, ctx.env).catch(() => {})
+    if (command === 'init') return await cmdInit(ctx)
     if (command === 'doctor') return await cmdDoctor(ctx)
     if (command === 'snapshot') return await cmdSnapshot(ctx, flags)
     if (command === 'list') return await cmdList(ctx, flags)
@@ -617,6 +727,8 @@ export async function main(argv = process.argv) {
     if (command === 'upgrade') return await cmdUpgrade(ctx, flags, positionals)
     if (command === 'export') return await cmdExport(ctx, flags)
     if (command === 'storage') return await cmdStorage(ctx, flags, positionals)
+    if (command === 's3') return await cmdS3Keys(ctx, flags, positionals)
+    if (command === 'plugins') return await cmdPlugins(ctx, flags, positionals)
     if (command === 'trial') return await cmdTrial(ctx)
     if (command === 'startup') {
       const { cloud } = await cloudFor(ctx)

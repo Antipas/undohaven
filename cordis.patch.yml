@@ -1,0 +1,12 @@
+# Thin root bundle so `dsh plugin add github:Antipas/undohaven` loads the main plugin.
+# dsh only inserts new rows under `insert:`; a bare `- id:` patches an existing
+# row and prints `entry "undohaven" not found` if that id is absent.
+# Relative plugin paths resolve beside this file (dsh app-boot anchorInsertedPluginNames).
+- insert:
+    - id: undohaven
+      name: ./packages/plugin/index.js
+      config:
+        intervalHours: 6
+        snapshotOnStart: true
+        snapshotOnDispose: true
+        includeCredentials: false

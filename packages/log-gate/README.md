@@ -1,5 +1,7 @@
 # dsh-log-gate
 
+![dsh-plugin](https://img.shields.io/badge/dsh--plugin-181717)
+
 第三方插件，不是 dsh 官方组件。它只做一件事：按你的规则，让会话日志上传跳过某些会话。备份不是它的工作；文末提到的 UndoHaven 是另一个独立工具。
 
 Unofficial third-party plugin compatible with dsh. It asks the session-log uploader to skip sessions you choose. Backup is a different tool.

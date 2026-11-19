@@ -40,30 +40,21 @@ function log(ctx, level, message) {
   else if (level === 'error') console.error(message)
 }
 
-async function readBody(req, limit = 1_000_000) {
-  const chunks = []
-  let size = 0
-  for await (const chunk of req) {
-    size += chunk.length
-    if (size > limit) throw new Error('body too large')
-    chunks.push(chunk)
-  }
-  return Buffer.concat(chunks)
-}
-
-function send(res, status, body) {
-  const payload = Buffer.from(JSON.stringify(body))
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-    'content-length': payload.length,
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   })
-  res.end(payload)
 }
 
-function loopback(req) {
-  const address = req.socket?.remoteAddress || ''
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+async function readJson(request) {
+  const text = await request.text()
+  if (text.length > 1_000_000) {
+    const error = new Error('body too large')
+    error.status = 413
+    throw error
+  }
+  return text ? JSON.parse(text) : {}
 }
 
 export function createRuntime(ctx, config = {}, hooks = {}) {
@@ -146,142 +137,131 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
   return runtime
 }
 
-export function mount(webServer, runtime) {
-  if (!webServer?.register) return () => {}
-  return webServer.register({
-    kind: 'prefix',
-    path: '/api/undohaven',
-    handler: async (req, res) => {
+/**
+ * dsh 0.2.2-rc.4 admits connection.fetch routes inside the shared /api
+ * handler before the handler runs. webServer.register does not, so these
+ * routes are not mounted there. Missing fetch.register mounts nothing.
+ */
+export function mount(connection, runtime) {
+  if (typeof connection?.fetch?.register !== 'function') return () => {}
+  const route = (path, methods, requestBody, fetch) => connection.fetch.register({ path, methods, requestBody, fetch })
+  const guarded = (fetch) => async (request) => {
+    try {
+      return await fetch(request)
+    } catch (error) {
+      runtime.lastError = error.message
+      return jsonResponse(error.status || 500, { error: error.code || 'error', zh: error.zh || error.message, en: error.en || error.message })
+    }
+  }
+  const stops = [
+    route('/api/undohaven/status', ['GET'], 'buffered', guarded(async () => {
+      const paths = runtime.paths()
+      let unlocked = true
       try {
-        if (!loopback(req)) {
-          send(res, 403, { error: 'forbidden', zh: '只接受本机请求', en: 'Only loopback clients are accepted' })
-          return
-        }
-        const url = new URL(req.url || '/', 'http://127.0.0.1')
-        const path = url.pathname
-        const paths = runtime.paths()
-        if (req.method === 'GET' && path === '/api/undohaven/status') {
-          let unlocked = true
-          try {
-            await loadDek(paths.dataDir)
-          } catch {
-            unlocked = false
-          }
-          const config = await loadConfig(paths.dataDir)
-          const prompts = await readPrompts(paths.dataDir)
-          send(res, 200, {
-            unlocked,
-            loggedIn: !!config.accessToken,
-            apiBase: config.apiBase,
-            lastSnapshot: runtime.lastSnapshot,
-            lastError: runtime.lastError,
-            upgrade: prompts.upgrade || null,
-            zh: unlocked ? '已解锁' : '未解锁，先在这里或命令行登录',
-            en: unlocked ? 'Unlocked' : 'Locked. Log in here or with the CLI',
-          })
-          return
-        }
-        if (req.method === 'GET' && path === '/api/undohaven/snapshots') {
-          const { cloud } = await cloudFromConfig(paths.dataDir)
-          const snapshots = await listSnapshots({ dataDir: paths.dataDir, cloud, allowCloudFailure: true })
-          send(res, 200, { snapshots })
-          return
-        }
-        if (req.method === 'POST' && path === '/api/undohaven/snapshot') {
-          const snap = await runtime.snapshot('manual')
-          send(res, 200, { ok: !snap.cloudError, id: snap.id, bytes: snap.bytes, cloud: snap.cloud, error: runtime.lastError })
-          return
-        }
-        if (req.method === 'POST' && path === '/api/undohaven/restore-plan') {
-          const body = JSON.parse((await readBody(req)).toString('utf8') || '{}')
-          const scope = ['sessions', 'storages', 'config', 'all'].includes(body.scope) ? body.scope : 'all'
-          const id = String(body.id || '')
-          send(res, 200, {
-            blocked: true,
-            zh: '恢复必须先退出 dsh。桌面端的紧急恢复可能会卸掉第三方插件，所以这一步交给独立命令。',
-            en: 'Restore runs only after dsh has quit. Desktop fatal recovery can remove third-party plugins, so this step belongs to the standalone command.',
-            command: `undohaven restore --to ${id} --scope ${scope}`,
-          })
-          return
-        }
-        if (req.method === 'POST' && path === '/api/undohaven/login/start') {
-          const body = JSON.parse((await readBody(req)).toString('utf8') || '{}')
-          const apiBase = body.apiBase || (await loadConfig(paths.dataDir)).apiBase
-          if (!apiBase) {
-            send(res, 400, { error: 'need_api', zh: '需要 API 地址', en: 'API base URL is required' })
-            return
-          }
-          const code = await new CloudClient({ apiBase }).deviceCode({ name: 'dsh-undohaven', purpose: 'login' })
-          runtime.pending = { apiBase, deviceCode: code.device_code, userCode: code.user_code }
-          send(res, 200, { user_code: code.user_code, verification_uri: code.verification_uri, interval: code.interval })
-          return
-        }
-        if (req.method === 'GET' && path === '/api/undohaven/login/poll') {
-          if (!runtime.pending) {
-            send(res, 400, { error: 'no_login', zh: '还没开始登录', en: 'Login has not started' })
-            return
-          }
-          try {
-            const token = await new CloudClient({ apiBase: runtime.pending.apiBase }).deviceToken(runtime.pending.deviceCode)
-            runtime.pending.token = token
-            send(res, 200, { pending: false, userId: token.user_id })
-          } catch (error) {
-            if (error.code === 'authorization_pending' || error.code === 'slow_down') {
-              send(res, 200, { pending: true })
-              return
-            }
-            throw error
-          }
-          return
-        }
-        if (req.method === 'POST' && path === '/api/undohaven/login/finish') {
-          const body = JSON.parse((await readBody(req)).toString('utf8') || '{}')
-          if (!runtime.pending?.token) {
-            send(res, 400, { error: 'not_authorized', zh: '设备还没授权', en: 'The device is not authorized yet' })
-            return
-          }
-          const authed = new CloudClient({ apiBase: runtime.pending.apiBase, token: runtime.pending.token.access_token })
-          const account = await authed.account()
-          let created = false
-          if (!account.keys) {
-            const keys = await establishKeys(paths.dataDir, String(body.passphrase || ''))
-            await authed.putKeys({ ...publicKeyFields(keys), rotate: false })
-            runtime.recoveryWords = keys.words
-            created = true
-          } else {
-            await unlockPassphrase(paths.dataDir, String(body.passphrase || ''), {
-              salt: account.keys.salt,
-              kdf: account.keys.kdf,
-              wrappedDek: account.keys.wrappedDek,
-              wrappedDekRecovery: account.keys.wrappedDekRecovery,
-            })
-          }
-          await saveConfig(paths.dataDir, {
-            apiBase: runtime.pending.apiBase,
-            accessToken: runtime.pending.token.access_token,
-            userId: runtime.pending.token.user_id,
-            deviceId: runtime.pending.token.device_id,
-            includeCredentials: false,
-          })
-          const words = runtime.recoveryWords
-          runtime.recoveryWords = null
-          runtime.pending = null
-          send(res, 200, {
-            ok: true,
-            created,
-            recoveryWords: words || null,
-            zh: created ? '把恢复码抄到机器外面。口令和恢复码都丢了就无法解密。' : '已用口令解开。',
-            en: created ? 'Copy the recovery code off this machine. Losing both passphrase and recovery code makes the backup undecryptable.' : 'Unlocked with the passphrase.',
-          })
-          return
-        }
-        send(res, 404, { error: 'not_found', zh: '没有这个接口', en: 'No such route' })
-      } catch (error) {
-        runtime.lastError = error.message
-        send(res, 500, { error: error.code || 'error', zh: error.zh || error.message, en: error.en || error.message })
+        await loadDek(paths.dataDir)
+      } catch {
+        unlocked = false
       }
-    },
-  })
+      const config = await loadConfig(paths.dataDir)
+      const prompts = await readPrompts(paths.dataDir)
+      return jsonResponse(200, {
+        unlocked,
+        loggedIn: !!config.accessToken,
+        apiBase: config.apiBase,
+        lastSnapshot: runtime.lastSnapshot,
+        lastError: runtime.lastError,
+        upgrade: prompts.upgrade || null,
+        zh: unlocked ? '已解锁' : '未解锁，先在这里或命令行登录',
+        en: unlocked ? 'Unlocked' : 'Locked. Log in here or with the CLI',
+      })
+    })),
+  ]
+  const pathsOf = () => runtime.paths()
+  stops.push(route('/api/undohaven/snapshots', ['GET'], 'buffered', guarded(async () => {
+    const paths = pathsOf()
+    const { cloud } = await cloudFromConfig(paths.dataDir)
+    const snapshots = await listSnapshots({ dataDir: paths.dataDir, cloud, allowCloudFailure: true })
+    return jsonResponse(200, { snapshots })
+  })))
+  stops.push(route('/api/undohaven/snapshot', ['POST'], 'buffered', guarded(async () => {
+    const snap = await runtime.snapshot('manual')
+    return jsonResponse(200, { ok: !snap.cloudError, id: snap.id, bytes: snap.bytes, cloud: snap.cloud, error: runtime.lastError })
+  })))
+  stops.push(route('/api/undohaven/restore-plan', ['POST'], 'buffered', guarded(async (request) => {
+    const body = await readJson(request)
+    const scope = ['sessions', 'storages', 'config', 'all'].includes(body.scope) ? body.scope : 'all'
+    const id = String(body.id || '')
+    return jsonResponse(200, {
+      blocked: true,
+      zh: '恢复必须先退出 dsh。桌面端的紧急恢复可能会卸掉第三方插件，所以这一步交给独立命令。',
+      en: 'Restore runs only after dsh has quit. Desktop fatal recovery can remove third-party plugins, so this step belongs to the standalone command.',
+      command: `undohaven restore --to ${id} --scope ${scope}`,
+    })
+  })))
+  stops.push(route('/api/undohaven/login/start', ['POST'], 'buffered', guarded(async (request) => {
+    const body = await readJson(request)
+    const paths = pathsOf()
+    const apiBase = body.apiBase || (await loadConfig(paths.dataDir)).apiBase
+    if (!apiBase) return jsonResponse(400, { error: 'need_api', zh: '需要 API 地址', en: 'API base URL is required' })
+    const code = await new CloudClient({ apiBase }).deviceCode({ name: 'dsh-undohaven', purpose: 'login' })
+    runtime.pending = { apiBase, deviceCode: code.device_code, userCode: code.user_code }
+    return jsonResponse(200, { user_code: code.user_code, verification_uri: code.verification_uri, interval: code.interval })
+  })))
+  stops.push(route('/api/undohaven/login/poll', ['GET'], 'buffered', guarded(async () => {
+    if (!runtime.pending) return jsonResponse(400, { error: 'no_login', zh: '还没开始登录', en: 'Login has not started' })
+    try {
+      const token = await new CloudClient({ apiBase: runtime.pending.apiBase }).deviceToken(runtime.pending.deviceCode)
+      runtime.pending.token = token
+      return jsonResponse(200, { pending: false, userId: token.user_id })
+    } catch (error) {
+      if (error.code === 'authorization_pending' || error.code === 'slow_down') return jsonResponse(200, { pending: true })
+      throw error
+    }
+  })))
+  stops.push(route('/api/undohaven/login/finish', ['POST'], 'buffered', guarded(async (request) => {
+    const body = await readJson(request)
+    const paths = pathsOf()
+    if (!runtime.pending?.token) return jsonResponse(400, { error: 'not_authorized', zh: '设备还没授权', en: 'The device is not authorized yet' })
+    const authed = new CloudClient({ apiBase: runtime.pending.apiBase, token: runtime.pending.token.access_token })
+    const account = await authed.account()
+    let created = false
+    if (!account.keys) {
+      const keys = await establishKeys(paths.dataDir, String(body.passphrase || ''))
+      await authed.putKeys({ ...publicKeyFields(keys), rotate: false })
+      runtime.recoveryWords = keys.words
+      created = true
+    } else {
+      await unlockPassphrase(paths.dataDir, String(body.passphrase || ''), {
+        salt: account.keys.salt,
+        kdf: account.keys.kdf,
+        wrappedDek: account.keys.wrappedDek,
+        wrappedDekRecovery: account.keys.wrappedDekRecovery,
+      })
+    }
+    await saveConfig(paths.dataDir, {
+      apiBase: runtime.pending.apiBase,
+      accessToken: runtime.pending.token.access_token,
+      userId: runtime.pending.token.user_id,
+      deviceId: runtime.pending.token.device_id,
+      includeCredentials: false,
+    })
+    const words = runtime.recoveryWords
+    runtime.recoveryWords = null
+    runtime.pending = null
+    return jsonResponse(200, {
+      ok: true,
+      created,
+      recoveryWords: words || null,
+      zh: created ? '把恢复码抄到机器外面。口令和恢复码都丢了就无法解密。' : '已用口令解开。',
+      en: created ? 'Copy the recovery code off this machine. Losing both passphrase and recovery code makes the backup undecryptable.' : 'Unlocked with the passphrase.',
+    })
+  })))
+  return () => {
+    for (const stop of stops) {
+      const result = stop?.()
+      if (result && typeof result.then === 'function') result.catch(() => {})
+    }
+  }
 }
 
 export function apply(ctx, config) {
@@ -289,10 +269,11 @@ export function apply(ctx, config) {
   const booting = runtime.boot()
   runtime.startTimer()
   let unmount = () => {}
-  if (ctx.webServer?.register) unmount = mount(ctx.webServer, runtime) || (() => {})
-  else if (typeof ctx.inject === 'function') {
-    ctx.inject(['webServer'], (scoped) => mount(scoped.webServer, runtime))
+  const attach = (host) => {
+    if (typeof host?.connection?.fetch?.register === 'function') unmount = mount(host.connection, runtime) || (() => {})
   }
+  if (typeof ctx.connection?.fetch?.register === 'function') attach(ctx)
+  else if (typeof ctx.inject === 'function') ctx.inject(['connection'], (scoped) => attach(scoped))
   return async () => {
     unmount()
     await booting

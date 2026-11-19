@@ -9,25 +9,15 @@ import { Config, createRuntime, mount } from '../index.js'
 
 const PASSPHRASE = 'correct horse battery'
 
-function mockRes() {
+function fakeConnection() {
+  const routes = []
   return {
-    status: 0,
-    headers: {},
-    body: '',
-    writeHead(status) { this.status = status },
-    end(payload) { this.body = Buffer.from(payload).toString('utf8') },
-    json() { return JSON.parse(this.body) },
-  }
-}
-
-function mockReq({ method, url, body = '', address = '127.0.0.1' }) {
-  const buf = Buffer.from(body)
-  return {
-    method,
-    url,
-    socket: { remoteAddress: address },
-    async *[Symbol.asyncIterator]() {
-      if (buf.length) yield buf
+    routes,
+    fetch: {
+      register(route) {
+        routes.push(route)
+        return () => {}
+      },
     },
   }
 }
@@ -49,10 +39,11 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   await writeFile(join(dsh, 'skills', 'SKILL.md'), 'keep-me')
   await establishKeys(data, PASSPHRASE)
   const env = { UNDOHAVEN_DSH_BASE_VERSION: '1.0.0', UNDOHAVEN_DSH_VERSION: '1.0.0' }
-  const routes = []
+  const webHits = []
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
-    webServer: { register(route) { routes.push(route); return () => { routes.pop() } } },
+    webServer: { register(route) { webHits.push(route); return () => {} } },
+    connection: fakeConnection(),
   }
   const runtime = createRuntime(ctx, { snapshotOnStart: true, snapshotOnDispose: false, intervalHours: 6 }, {
     dataDir: data,
@@ -68,22 +59,26 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   assert.equal(second.pinned.kind, 'pre-upgrade')
   const rows = await listSnapshots({ dataDir: data })
   assert.ok(rows.some((row) => row.dshBaseVersion === '1.0.0' && row.kind === 'pre-upgrade'))
-  const unmount = mount(ctx.webServer, runtime)
-  const statusRes = mockRes()
-  await routes[0].handler(mockReq({ method: 'GET', url: '/api/undohaven/status' }), statusRes)
-  assert.equal(statusRes.status, 200)
-  assert.equal(statusRes.json().unlocked, true)
-  const denied = mockRes()
-  await routes[0].handler(mockReq({ method: 'GET', url: '/api/undohaven/status', address: '8.8.8.8' }), denied)
-  assert.equal(denied.status, 403)
-  const plan = mockRes()
-  await routes[0].handler(mockReq({
+  const unmount = mount(ctx.connection, runtime)
+  assert.equal(webHits.length, 0)
+  assert.ok(ctx.connection.routes.some((route) => route.path === '/api/undohaven/status' && route.methods.includes('GET')))
+  const status = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/status').fetch(new Request('http://127.0.0.1/api/undohaven/status'))
+  assert.equal(status.status, 200)
+  assert.equal((await status.json()).unlocked, true)
+  const bare = mount(null, runtime)
+  assert.equal(typeof bare, 'function')
+  bare()
+  const skipped = mount({ fetch: {} }, runtime)
+  skipped()
+  assert.equal(webHits.length, 0)
+  const plan = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/restore-plan').fetch(new Request('http://127.0.0.1/api/undohaven/restore-plan', {
     method: 'POST',
-    url: '/api/undohaven/restore-plan',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id: 'snap_abc', scope: 'sessions' }),
-  }), plan)
-  assert.match(plan.json().command, /undohaven restore --to snap_abc --scope sessions/)
-  assert.match(plan.json().zh, /退出/)
+  }))
+  const planBody = await plan.json()
+  assert.match(planBody.command, /undohaven restore --to snap_abc --scope sessions/)
+  assert.match(planBody.zh, /退出/)
   unmount()
   await runtime.shutdown()
   await rm(root, { recursive: true, force: true })

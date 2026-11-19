@@ -61,5 +61,14 @@ export {
 export { PLANS, PRICES, PRICE_ENV, effectivePlan, versionLine, isCrossMajorDowngrade } from './plans.js'
 export { padBlob, unpadBlob, loadStorageConfig, saveStorageConfig, redactStorage, s3Call, newDeviceLabel } from './byo.js'
 export { UPGRADE, readPrompts, writePrompts } from './prompts.js'
-export { ANONYMOUS_FUNNEL, anonymousMeta, funnelOptedIn, reportAnonymousEvent } from './funnel.js'
-export { readPaddedChunk } from './store.js'
+export { ANONYMOUS_FUNNEL, anonymousMeta, funnelOptedIn, limitNudgeLine, reportAnonymousEvent, showLimitNudge, TRIAL_URL } from './funnel.js'
+export { readPaddedChunk, readSnapshotRecord } from './store.js'
+export {
+  applyDisabledFlags,
+  collectPluginState,
+  diffPluginState,
+  installProfile,
+  loadPluginState,
+  restorePluginState,
+  savePluginState,
+} from './plugins.js'

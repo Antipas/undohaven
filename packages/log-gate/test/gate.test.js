@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { zstdCompressSync } from 'node:zlib'
 import { auditHome, readPatchPlugins, renderReport } from '../src/audit.js'
 import { decideBlock, ruleMatches } from '../src/match.js'
-import { Config, apply, classifyLive, currentRules } from '../index.js'
+import { Config, apply, classifyLive, currentRules, mount } from '../index.js'
 
 const DSH = process.env.UNDOHAVEN_DSH_PREFIX || '/tmp/hhy-dsh'
 
@@ -78,6 +78,43 @@ test('audit report names switches, catch-up, and UndoHaven', async () => {
   assert.match(text, /delivery-accepted/)
   assert.match(text, /FEEDBACK_ONLY|Telemetry/)
   await rm(root, { recursive: true, force: true })
+})
+
+test('log-gate status is a connection.fetch route and is not mounted on webServer', async () => {
+  const registered = []
+  const web = []
+  const connection = { fetch: { register(route) { registered.push(route); return async () => {} } } }
+  const ctx = {
+    connection,
+    webServer: { register(route) { web.push(route); return () => {} } },
+    sessions: { list() { return [{ id: 's1', header: { cwd: '/work/secret-proj' } }] } },
+  }
+  const stop = mount(connection, ctx, { mode: 'listed', rules: ['secret-proj'] })
+  assert.equal(web.length, 0)
+  assert.equal(registered.length, 1)
+  assert.equal(registered[0].path, '/api/log-gate/status')
+  assert.deepEqual([...registered[0].methods], ['GET'])
+  const response = await registered[0].fetch(new Request('http://127.0.0.1/api/log-gate/status'))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.sessions[0].blocked, true)
+  assert.equal(typeof mount(null, ctx, {}), 'function')
+  assert.equal(typeof mount({ fetch: {} }, ctx, {}), 'function')
+  assert.equal(web.length, 0)
+  const dispose = apply({
+    sessionLogDeepSeek: { registerExclusion() { return () => {} } },
+    sessions: ctx.sessions,
+    logger: { info() {} },
+    webServer: ctx.webServer,
+    inject(names, fn) {
+      assert.deepEqual(names, ['connection'])
+      fn({ connection })
+    },
+  }, { mode: 'all', rules: [] })
+  assert.equal(registered.length, 2)
+  assert.equal(web.length, 0)
+  dispose()
+  await stop()
 })
 
 test('real session-log service omits a blocked session before reading events', async () => {

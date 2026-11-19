@@ -1,6 +1,6 @@
 {
   "name": "undohaven",
-  "version": "0.1.1",
+  "version": "0.1.6",
   "type": "module",
   "description": "UndoHaven / 后悔药 — encrypted local and off-machine backup for the dsh agent runtime.",
   "engines": {
@@ -15,6 +15,7 @@
   "keywords": [
     "dsh",
     "dsh-plugin",
+    "dsh-plugins",
     "dsh-bundle",
     "backup",
     "snapshot",

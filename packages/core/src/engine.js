@@ -37,6 +37,7 @@ import {
 } from './store.js'
 import { loadStorageConfig } from './byo.js'
 import { detectDshVersions } from './versions.js'
+import { collectPluginState, savePluginState } from './plugins.js'
 
 const require = createRequire(import.meta.url)
 const TOOL_VERSION = require('../package.json').version
@@ -204,6 +205,13 @@ export async function createSnapshot(opts) {
     pinned: kind === 'pre-upgrade',
     cloud: false,
   }
+  try {
+    const plugins = await collectPluginState(opts.dshHome)
+    record.plugins = plugins
+    await savePluginState(dataDir, plugins)
+  } catch {
+    record.plugins = null
+  }
   await writeSnapshotRecord(dataDir, record)
   let cloudError = null
   if (opts.cloud) {
@@ -216,8 +224,8 @@ export async function createSnapshot(opts) {
       }
       const storage = await loadStorageConfig(dataDir)
       const byo = storage.mode === 's3' || storage.mode === 'dir'
-      if (byo) {
-        await opts.cloud.createSnapshot({
+      const created = byo
+        ? await opts.cloud.createSnapshot({
           id,
           createdAt,
           kind,
@@ -229,23 +237,25 @@ export async function createSnapshot(opts) {
           encryptedManifest: record.encryptedManifest,
           pinned: record.pinned,
         })
-      } else {
-        const missing = await opts.cloud.missing(record.chunkIds)
-        for (const chunkId of missing) {
-          await opts.cloud.uploadChunk(chunkId, await readPaddedChunk(dataDir, chunkId))
-        }
-        await opts.cloud.createSnapshot({
-          id,
-          createdAt,
-          kind,
-          bytes,
-          chunkIds: record.chunkIds,
-          dshVersion: versions.dshVersion,
-          includesCredentials: includeCredentials,
-          encryptedManifest: record.encryptedManifest,
-          pinned: record.pinned,
-        })
-      }
+        : await (async () => {
+          const missing = await opts.cloud.missing(record.chunkIds)
+          for (const chunkId of missing) {
+            await opts.cloud.uploadChunk(chunkId, await readPaddedChunk(dataDir, chunkId))
+          }
+          return opts.cloud.createSnapshot({
+            id,
+            createdAt,
+            kind,
+            bytes,
+            chunkIds: record.chunkIds,
+            dshVersion: versions.dshVersion,
+            includesCredentials: includeCredentials,
+            encryptedManifest: record.encryptedManifest,
+            pinned: record.pinned,
+          })
+        })()
+      record.pruned = Number(created?.pruned || 0)
+      record.plan = created?.plan || null
       record.cloud = true
       await writeSnapshotRecord(dataDir, record)
     } catch (error) {

@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+dist/
+coverage/
+*.log
+.DS_Store
+agent-tools/
+.env
+.env.*
+!.env.example
+.houhuiyao/
+*.tmp

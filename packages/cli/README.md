@@ -1,13 +1,17 @@
 # undohaven
 
+![dsh-plugin](https://img.shields.io/badge/dsh--plugin-181717)
+
 Unofficial third-party command line for encrypted snapshots, rollback, and moving a dsh home. Compatible with dsh. Not an official dsh product.
 
 The default snapshot stays on this machine. `undohaven snapshot` needs a passphrase and does not need an account. `undohaven restore --to SNAPSHOT_ID` writes that snapshot back after dsh has quit.
 
 ```bash
+npx undohaven init
 npm i -g undohaven
 export UNDOHAVEN_PASSPHRASE='at least 8 characters'
 undohaven snapshot
+undohaven s3 keys create --bucket undohaven
 undohaven list
 undohaven restore --to SNAPSHOT_ID --scope all
 ```
@@ -15,3 +19,34 @@ undohaven restore --to SNAPSHOT_ID --scope all
 Losing both the passphrase and the recovery code means the encrypted copy cannot be opened. There is no reset.
 
 Homepage: https://undohaven.com/
+
+## Paid API (x402)
+
+Unofficial third-party, compatible with dsh. An agent can pay `https://undohaven.com` per call in USDC on Base. `POST /x402/snapshot` and `GET /x402/restore/{id}` are 0.05 USDC. `POST /x402/pass` is 6 USDC for 30 days of Pro, the same as the Stripe Pro monthly price, with no discount. The route ships disabled until the operator sets the public vars.
+
+`X402_PAYER_KEY` below is the caller's key. It is not an UndoHaven secret.
+
+```js
+import { wrapFetchWithPaymentFromConfig } from '@x402/fetch'
+import { ExactEvmScheme } from '@x402/evm'
+import { privateKeyToAccount } from 'viem/accounts'
+
+const account = privateKeyToAccount(process.env.X402_PAYER_KEY)
+const paidFetch = wrapFetchWithPaymentFromConfig(fetch, {
+  schemes: [{ network: 'eip155:84532', client: new ExactEvmScheme(account) }],
+})
+
+const response = await paidFetch('https://undohaven.com/x402/snapshot', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'idempotency-key': 'snapshot-example-001',
+  },
+  body: JSON.stringify({
+    label: 'agent-snapshot',
+    files: { 'config.json': '{"model":"demo"}' },
+  }),
+})
+```
+
+Docs: https://undohaven.com/docs/x402

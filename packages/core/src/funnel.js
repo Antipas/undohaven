@@ -1,10 +1,13 @@
 import { loadConfig } from './keys.js'
 import { readPrompts, writePrompts } from './prompts.js'
 
-export const ANONYMOUS_FUNNEL = new Set(['install', 'first_snapshot', 'rollback', 'limit_hit'])
+export const ANONYMOUS_FUNNEL = new Set(['install', 'first_snapshot', 'rollback', 'limit_hit', 'copy_install'])
 
 const SCOPES = new Set(['sessions', 'storages', 'config', 'all'])
-const LIMITS = new Set(['quota', 'device', 'snapshot'])
+const LIMITS = new Set(['quota', 'device', 'snapshot', 'history'])
+const UTM_SOURCES = new Set(['github', 'x', 'awesome', 'direct'])
+
+export const TRIAL_URL = 'https://undohaven.com/pricing?utm_source=cli&utm_medium=limit'
 
 export function funnelOptedIn(config, env = {}) {
   const flag = env.UNDOHAVEN_FUNNEL
@@ -22,7 +25,31 @@ export function anonymousMeta(name, meta) {
     const reason = LIMITS.has(meta?.reason) ? meta.reason : 'quota'
     return { reason }
   }
+  if (name === 'copy_install') {
+    const source = UTM_SOURCES.has(meta?.source) ? meta.source : 'direct'
+    return { source }
+  }
   return null
+}
+
+export function limitNudgeLine(kind) {
+  if (kind === 'history') {
+    return `Free history is 7 days. A 14-day Pro trial needs no card: ${TRIAL_URL}`
+  }
+  return `A second device needs Pro. A 14-day trial needs no card: ${TRIAL_URL}`
+}
+
+/** Print-once local flag. The funnel ping stays inside reportAnonymousEvent, so it is sent only when opted in. */
+export async function showLimitNudge(dataDir, kind, env = process.env) {
+  const prompts = await readPrompts(dataDir)
+  const nudges = prompts.nudges && typeof prompts.nudges === 'object' ? { ...prompts.nudges } : {}
+  if (nudges[kind]) return { shown: false, line: '' }
+  nudges[kind] = true
+  prompts.nudges = nudges
+  await writePrompts(dataDir, prompts)
+  const reason = kind === 'history' ? 'history' : 'device'
+  await reportAnonymousEvent(dataDir, 'limit_hit', { reason }, env).catch(() => {})
+  return { shown: true, line: limitNudgeLine(kind) }
 }
 
 /** Opt-in, account-free funnel ping. No token is sent. */
