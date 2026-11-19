@@ -2,7 +2,7 @@
   "name": "undohaven-public",
   "private": true,
   "type": "module",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "Unofficial third-party encrypted snapshots, rollback, and machine migration for dsh. Compatible with dsh. Not affiliated with DeepSeek.",
   "workspaces": [
     "packages/*"
@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.19.0",
-    "undohaven-core": "0.1.6"
+    "undohaven-core": "0.1.8"
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 packages/core/test/*.test.js packages/plugin/test/*.test.js packages/log-gate/test/*.test.js"

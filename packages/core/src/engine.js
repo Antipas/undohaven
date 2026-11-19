@@ -37,6 +37,7 @@ import {
 } from './store.js'
 import { loadStorageConfig } from './byo.js'
 import { detectDshVersions } from './versions.js'
+import { stripRemovedWorkingDirectoryTool } from './compat.js'
 import { collectPluginState, savePluginState } from './plugins.js'
 
 const require = createRequire(import.meta.url)
@@ -448,7 +449,11 @@ export async function restoreSnapshot(opts) {
   for (const entry of selected) {
     await writeEntry(opts.dataDir, entry, dek, { dsh: opts.dshHome, agents: opts.agentsHome })
   }
-  return { id: manifest.id, files: selected.length, scope, safetyId: safety?.id ?? null, safetyCloudError: safety?.cloudError ?? null }
+  let compat = []
+  if (scope === 'all' || scope === 'config') {
+    compat = await stripRemovedWorkingDirectoryTool(opts.dshHome)
+  }
+  return { id: manifest.id, files: selected.length, scope, safetyId: safety?.id ?? null, safetyCloudError: safety?.cloudError ?? null, compat }
 }
 
 export async function pinSnapshot(opts, id) {

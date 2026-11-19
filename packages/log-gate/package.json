@@ -1,6 +1,6 @@
 {
   "name": "dsh-log-gate",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "description": "Unofficial third-party gate for dsh session-log upload.",
   "engines": {

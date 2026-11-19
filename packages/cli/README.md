@@ -20,9 +20,13 @@ Losing both the passphrase and the recovery code means the encrypted copy cannot
 
 Homepage: https://undohaven.com/
 
+## dsh compatibility
+
+Checked against dsh 0.2.2-rc.5 and the session-workspace-root change on master. `restore` and `migrate-machine` write the dsh home back as stored. `header.cwd`, session events (`working-directory/change` and `workspace-root/change`), and `storages/workspace.json` paths are not rewritten. The Host moves the workspace root. Restore drops the removed `tool-working-directory` patch entry and the `@deepseek-ai/dsh-tool-working-directory` dependency so a snapshot from before 0.2.2-rc.3 loads on 0.2.2-rc.5. Range: dsh `>=0.2.1-rc.5 <0.3.0`.
+
 ## Paid API (x402)
 
-Unofficial third-party, compatible with dsh. An agent can pay `https://undohaven.com` per call in USDC on Base. `POST /x402/snapshot` and `GET /x402/restore/{id}` are 0.05 USDC. `POST /x402/pass` is 6 USDC for 30 days of Pro, the same as the Stripe Pro monthly price, with no discount. The route ships disabled until the operator sets the public vars.
+Unofficial third-party, compatible with dsh. An agent can pay `https://undohaven.com` per call in USDC on Base. `POST /x402/snapshot` and `GET /x402/restore/{id}` are 0.05 USDC. `POST /x402/pass` is 6 USDC for 30 days of Pro, the same as the Stripe Pro monthly price, with no discount. The route ships disabled until the operator sets the public vars. If settlement fails (e.g. facilitator nonce too low), you were not charged; retry once.
 
 `X402_PAYER_KEY` below is the caller's key. It is not an UndoHaven secret.
 

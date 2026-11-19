@@ -1,6 +1,6 @@
 {
   "name": "undohaven-core",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "type": "module",
   "description": "Snapshot, encryption, and restore engine for UndoHaven.",
   "engines": {

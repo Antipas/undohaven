@@ -1,8 +1,11 @@
-# UndoHaven bundle patch. Independent of the upstream runtime vendor.
-- id: undohaven
-  name: dsh-undohaven
-  config:
-    intervalHours: 6
-    snapshotOnStart: true
-    snapshotOnDispose: true
-    includeCredentials: false
+# dsh only inserts new rows under `insert:`. A bare `- id:` patches an
+# existing row and prints `entry "undohaven" not found` when that id is absent.
+# `name` is the installed package. Relative paths are only for a git checkout.
+- insert:
+    - id: undohaven
+      name: dsh-undohaven
+      config:
+        intervalHours: 6
+        snapshotOnStart: true
+        snapshotOnDispose: true
+        includeCredentials: false

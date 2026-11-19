@@ -1,6 +1,9 @@
-# Third-party session-log gate. Not part of the dsh distribution.
-- id: log-gate
-  name: dsh-log-gate
-  config:
-    mode: all
-    rules: []
+# dsh only inserts new rows under `insert:`. A bare `- id:` patches an
+# existing row and prints `entry "log-gate" not found` when that id is absent.
+# `name` is the installed package. Relative paths are only for a git checkout.
+- insert:
+    - id: log-gate
+      name: dsh-log-gate
+      config:
+        mode: all
+        rules: []

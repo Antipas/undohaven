@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileLockHeld, portOpen } from './lock.js'
 import { isSessionFile, isStraySessionsDir } from './scan.js'
+import { patchMountsRemovedTool } from './compat.js'
 import { inspectZstd, isZstd, readSessionHeader } from './session.js'
 import { parseYaml, YamlError } from './yaml.js'
 
@@ -93,6 +94,15 @@ export async function doctor(dshHome) {
         const parsed = parseYaml(body.toString('utf8'))
         if (name === 'cordis.patch.yml' && parsed !== null && !Array.isArray(parsed)) {
           findings.push(finding('warn', 'bad_patch_yml', file.rel, 'cordis.patch.yml 不是列表。补丁应该是一组插件行', 'cordis.patch.yml is not a list. A patch should be a sequence of plugin rows'))
+        }
+        if (name === 'cordis.patch.yml' && patchMountsRemovedTool(body.toString('utf8'))) {
+          findings.push(finding(
+            'warn',
+            'removed_working_directory_tool',
+            file.rel,
+            '补丁还挂着 tool-working-directory。dsh 0.2.2-rc.3 及以后加载时会拒绝这一项。恢复会删掉这个模型工具，并保留 working-directory 服务。会话事件和 header.cwd 不会改写。',
+            'This patch still mounts tool-working-directory. dsh 0.2.2-rc.3 and later refuse that entry at load. Restore drops the model tool and keeps the working-directory service. Session events and header.cwd are not rewritten.',
+          ))
         }
       } catch (error) {
         const line = error instanceof YamlError ? error.line : 0

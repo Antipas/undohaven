@@ -6,13 +6,15 @@
 
 Unofficial third-party plugin compatible with dsh. It asks the session-log uploader to skip sessions you choose. Backup is a different tool.
 
+`cordis.patch.yml` inserts the `log-gate` row. A bare `- id:` looks for an entry that is not in the base profile, and dsh prints `entry "log-gate" not found`.
+
 ## 它实际调用的接口
 
 dsh 0.2.2-rc.1 的会话日志插件（配置 id `session-log-deepseek`）公开了 `ctx.sessionLogDeepSeek.registerExclusion()`。判断函数是同步的，只能看到 `sessionId` 和可选的 `purpose`。返回 `true` 时，这次请求不带 `dsh_session_log`，也不会写下 `delivery-accepted`。
 
 本插件在判断时用 `ctx.sessions.get(sessionId)` 读取该实时会话的 `header.cwd`，再按项目名、目录或 glob 匹配。没有改 dsh，也没有拦 HTTP。
 
-The session-log plugin (config id `session-log-deepseek`) exposes `registerExclusion()`. The predicate sees `sessionId` and an optional `purpose` only. This plugin reads `header.cwd` from the live session and matches project name, directory, or glob. It does not patch dsh and does not hook the network.
+The session-log plugin (config id `session-log-deepseek`) exposes `registerExclusion()`. The predicate sees `sessionId` and an optional `purpose` only. This plugin reads `header.cwd` from the live session and matches project name, directory, or glob. It does not patch dsh and does not hook the network. On dsh 0.2.2-rc.5, after session-workspace-root, `header.cwd` is still the original project. The gate keeps matching that project. It does not follow a Host `workspace-root/change`.
 
 ## 配置
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { REMOVED_WORKING_DIRECTORY_TOOL, stripWorkingDirectoryToolPackage, stripWorkingDirectoryToolYaml } from './compat.js'
 import { parseYaml } from './yaml.js'
 
 const STATE_NAME = 'plugins.json'
@@ -140,7 +141,10 @@ export async function restorePluginState(dshHome, state) {
     await mkdir(dir, { recursive: true })
     const pkgPath = join(dir, 'package.json')
     const pkg = await readJson(pkgPath) || { private: true }
-    pkg.dependencies = { ...(pkg.dependencies || {}), ...(profile.dependencies || {}) }
+    const dependencies = { ...(profile.dependencies || {}) }
+    delete dependencies[REMOVED_WORKING_DIRECTORY_TOOL.packageName]
+    pkg.dependencies = { ...(pkg.dependencies || {}), ...dependencies }
+    stripWorkingDirectoryToolPackage(pkg)
     if (Array.isArray(profile.bundles) && profile.bundles.length) {
       pkg.dsh = pkg.dsh || {}
       pkg.dsh.profile = pkg.dsh.profile || {}
@@ -149,7 +153,8 @@ export async function restorePluginState(dshHome, state) {
     }
     await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
     const patchPath = join(dir, 'cordis.patch.yml')
-    const patch = applyDisabledFlags(await readText(patchPath), profile.rows || [])
+    const rows = (profile.rows || []).filter((row) => row.id !== REMOVED_WORKING_DIRECTORY_TOOL.id && row.name !== REMOVED_WORKING_DIRECTORY_TOOL.packageName)
+    const patch = stripWorkingDirectoryToolYaml(applyDisabledFlags(await readText(patchPath), rows)).text
     await writeFile(patchPath, patch.endsWith('\n') ? patch : `${patch}\n`)
     changed.push(name)
   }

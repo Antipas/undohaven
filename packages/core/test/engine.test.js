@@ -256,6 +256,68 @@ test('snapshot repairs a truncated zstd tail, restores sqlite via backup, and ro
   await rm(root, { recursive: true, force: true })
 })
 
+test('restore keeps session workspace events and drops the removed working_directory tool', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hhy-ws-'))
+  const dsh = join(root, 'dsh')
+  const agents = join(root, 'agents')
+  const data = join(root, 'data')
+  const profile = join(dsh, 'profiles', 'web')
+  await mkdir(join(dsh, 'sessions', 'proj', 's1'), { recursive: true })
+  await mkdir(join(dsh, 'storages'), { recursive: true })
+  await mkdir(profile, { recursive: true })
+  await mkdir(agents, { recursive: true })
+  const session = [
+    JSON.stringify({ version: 4, id: 'sess-root', cwd: '/work/original', createdAt: 1 }),
+    JSON.stringify({ type: 'working-directory/change', cwd: '/work/original/sub' }),
+    JSON.stringify({ type: 'workspace-root/change', cwd: '/work/worktree' }),
+    '',
+  ].join('\n')
+  const sessionPath = join(dsh, 'sessions', 'proj', 's1', 'session.v4.jsonl')
+  await writeFile(sessionPath, session)
+  const patch = [
+    '- id: working-directory',
+    '  name: \'@deepseek-ai/dsh-working-directory\'',
+    '- id: tool-working-directory',
+    '  name: \'@deepseek-ai/dsh-tool-working-directory\'',
+    '- id: undohaven',
+    '  name: dsh-undohaven',
+    '',
+  ].join('\n')
+  await writeFile(join(profile, 'cordis.patch.yml'), patch)
+  await writeFile(join(profile, 'package.json'), `${JSON.stringify({
+    dependencies: {
+      '@deepseek-ai/dsh-working-directory': '0.2.2-rc.2',
+      '@deepseek-ai/dsh-tool-working-directory': '0.2.2-rc.2',
+      'dsh-undohaven': '0.1.8',
+    },
+  }, null, 2)}\n`)
+  await writeFile(join(dsh, 'storages', 'workspace.json'), JSON.stringify({
+    tables: { workspaces: { ws1: { path: '/work/original', sessionIds: ['sess-root'] } } },
+  }))
+  const before = await doctor(dsh)
+  assert.ok(before.findings.some((item) => item.code === 'removed_working_directory_tool'))
+  const keys = await establishKeys(data, PASSPHRASE)
+  const snap = await createSnapshot({ dataDir: data, dshHome: dsh, agentsHome: agents, dek: keys.dek, kind: 'manual' })
+  await writeFile(sessionPath, `${session}mutated\n`)
+  await writeFile(join(profile, 'cordis.patch.yml'), '- id: undohaven\n  name: dsh-undohaven\n')
+  await writeFile(join(dsh, 'storages', 'workspace.json'), '{"tables":{"workspaces":{}}}\n')
+  const restored = await restoreSnapshot({ dataDir: data, dshHome: dsh, agentsHome: agents, id: snap.id, dek: keys.dek, skipLockCheck: true, skipSafety: true })
+  assert.ok(restored.compat.length > 0)
+  assert.equal(await readFile(sessionPath, 'utf8'), session)
+  const nextPatch = await readFile(join(profile, 'cordis.patch.yml'), 'utf8')
+  assert.match(nextPatch, /id: working-directory/)
+  assert.match(nextPatch, /dsh-undohaven/)
+  assert.doesNotMatch(nextPatch, /tool-working-directory/)
+  const pkg = JSON.parse(await readFile(join(profile, 'package.json'), 'utf8'))
+  assert.equal(pkg.dependencies['@deepseek-ai/dsh-working-directory'], '0.2.2-rc.2')
+  assert.equal(pkg.dependencies['dsh-undohaven'], '0.1.8')
+  assert.equal(pkg.dependencies['@deepseek-ai/dsh-tool-working-directory'], undefined)
+  assert.equal(JSON.parse(await readFile(join(dsh, 'storages', 'workspace.json'), 'utf8')).tables.workspaces.ws1.path, '/work/original')
+  const after = await doctor(dsh)
+  assert.equal(after.findings.some((item) => item.code === 'removed_working_directory_tool'), false)
+  await rm(root, { recursive: true, force: true })
+})
+
 test('restore refuses a held session lock and an open desktop port', async (t) => {
   if (process.platform === 'win32') {
     t.skip('Windows uses a named semaphore, not flock. The semaphore name is covered by its own test.')
