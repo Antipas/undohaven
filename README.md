@@ -1,5 +1,7 @@
 # UndoHaven
 
+[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dantipas%252Fundohaven%26metric%3Drelease)](https://hol.org/registry/plugins/antipas%2Fundohaven?utm_source=hol_marketplace&utm_medium=plugins_badge&utm_campaign=plugins&utm_content=antipas%2Fundohaven&ref=plugin-author-4bbe52e6)
+
 Unofficial third-party, compatible with dsh, not affiliated with DeepSeek.
 
 Encrypted snapshots, rollback, and machine migration for dsh.
