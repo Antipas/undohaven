@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -81,6 +81,7 @@ test('audit report names switches, catch-up, and UndoHaven', async () => {
 })
 
 test('log-gate status is a connection.fetch route and is not mounted on webServer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'log-gate-token-'))
   const registered = []
   const web = []
   const connection = { fetch: { register(route) { registered.push(route); return async () => {} } } }
@@ -89,18 +90,30 @@ test('log-gate status is a connection.fetch route and is not mounted on webServe
     webServer: { register(route) { web.push(route); return () => {} } },
     sessions: { list() { return [{ id: 's1', header: { cwd: '/work/secret-proj' } }] } },
   }
-  const stop = mount(connection, ctx, { mode: 'listed', rules: ['secret-proj'] })
+  const env = { DSH_LOG_GATE_TOKEN_FILE: join(root, 'token') }
+  const stop = mount(connection, ctx, { mode: 'listed', rules: ['secret-proj'] }, env)
   assert.equal(web.length, 0)
-  assert.equal(registered.length, 1)
-  assert.equal(registered[0].path, '/api/log-gate/status')
-  assert.deepEqual([...registered[0].methods], ['GET'])
-  const response = await registered[0].fetch(new Request('http://127.0.0.1/api/log-gate/status'))
+  assert.equal(registered.length, 2)
+  assert.equal(registered[1].path, '/api/log-gate/status')
+  assert.deepEqual([...registered[1].methods], ['GET'])
+  const tokenStat = await stat(env.DSH_LOG_GATE_TOKEN_FILE)
+  assert.equal(tokenStat.mode & 0o777, 0o600)
+  const token = (await readFile(env.DSH_LOG_GATE_TOKEN_FILE, 'utf8')).trim()
+  const cross = await registered[1].fetch(new Request('http://127.0.0.1/api/log-gate/status', {
+    headers: { origin: 'https://evil.example', 'x-undohaven-token': token },
+  }))
+  assert.equal(cross.status, 403)
+  const response = await registered[1].fetch(new Request('http://127.0.0.1/api/log-gate/status', {
+    headers: { origin: 'http://127.0.0.1', 'x-undohaven-token': token },
+  }))
   const body = await response.json()
   assert.equal(response.status, 200)
   assert.equal(body.sessions[0].blocked, true)
   assert.equal(typeof mount(null, ctx, {}), 'function')
   assert.equal(typeof mount({ fetch: {} }, ctx, {}), 'function')
   assert.equal(web.length, 0)
+  const previous = process.env.DSH_LOG_GATE_TOKEN_FILE
+  process.env.DSH_LOG_GATE_TOKEN_FILE = env.DSH_LOG_GATE_TOKEN_FILE
   const dispose = apply({
     sessionLogDeepSeek: { registerExclusion() { return () => {} } },
     sessions: ctx.sessions,
@@ -111,10 +124,13 @@ test('log-gate status is a connection.fetch route and is not mounted on webServe
       fn({ connection })
     },
   }, { mode: 'all', rules: [] })
-  assert.equal(registered.length, 2)
+  if (previous === undefined) delete process.env.DSH_LOG_GATE_TOKEN_FILE
+  else process.env.DSH_LOG_GATE_TOKEN_FILE = previous
+  assert.equal(registered.length, 4)
   assert.equal(web.length, 0)
   dispose()
   await stop()
+  await rm(root, { recursive: true, force: true })
 })
 
 test('real session-log service omits a blocked session before reading events', async () => {

@@ -9,6 +9,10 @@ export function isZstd(buf) {
 /**
  * Walk independent zstd frames. A truncated final frame is reported and, when
  * repairing, dropped. A broken frame that is not the tail is left intact.
+ *
+ * Frame ends come from the frame header and block sizes. Node 22's
+ * zstdDecompressSync accepts a torn tail and returns an empty buffer, so a
+ * decompress probe cannot tell that tail from a finished frame.
  */
 export function inspectZstd(buf) {
   const frames = []
@@ -18,41 +22,54 @@ export function inspectZstd(buf) {
   }
   while (offset + 4 <= buf.length) {
     if (buf.readUInt32LE(offset) !== ZSTD_MAGIC) break
-    let next = offset + 4
-    let found = -1
-    while (next + 4 <= buf.length) {
-      if (buf.readUInt32LE(next) === ZSTD_MAGIC) {
-        try {
-          zstdDecompressSync(buf.subarray(offset, next))
-          found = next
-          break
-        } catch {
-          next += 1
-        }
-      } else {
-        next += 1
-      }
+    const parsed = frameEnd(buf, offset)
+    if (!parsed) break
+    if (parsed.truncated) {
+      return { ok: frames.length > 0, truncated: true, validEnd: offset, frames, error: 'truncated tail' }
     }
-    if (found === -1) {
-      try {
-        zstdDecompressSync(buf.subarray(offset))
-        frames.push({ start: offset, end: buf.length })
-        return { ok: true, truncated: false, validEnd: buf.length, frames }
-      } catch {
-        return {
-          ok: frames.length > 0,
-          truncated: true,
-          validEnd: offset,
-          frames,
-          error: 'truncated tail',
-        }
-      }
-    }
-    frames.push({ start: offset, end: found })
-    offset = found
+    frames.push({ start: offset, end: parsed.end })
+    offset = parsed.end
   }
   const truncated = offset < buf.length
-  return { ok: frames.length > 0 && !truncated, truncated, validEnd: offset, frames }
+  return {
+    ok: frames.length > 0 && !truncated,
+    truncated,
+    validEnd: offset,
+    frames,
+    error: truncated ? 'truncated tail' : undefined,
+  }
+}
+
+function frameEnd(buf, offset) {
+  if (offset + 5 > buf.length) return { truncated: true }
+  const desc = buf[offset + 4]
+  if ((desc & 0x08) !== 0) return null
+  const fcsFlag = desc >>> 6
+  const single = (desc >>> 5) & 1
+  const checksum = (desc >>> 2) & 1
+  const dictLen = [0, 1, 2, 4][desc & 3]
+  let pos = offset + 5
+  if (!single) pos += 1
+  pos += dictLen
+  pos += fcsFlag === 0 ? (single ? 1 : 0) : [0, 2, 4, 8][fcsFlag]
+  if (pos > buf.length) return { truncated: true }
+  while (pos < buf.length) {
+    if (pos + 3 > buf.length) return { truncated: true }
+    const header = buf.readUIntLE(pos, 3)
+    const last = header & 1
+    const type = (header >>> 1) & 3
+    const size = header >>> 3
+    pos += 3
+    if (type === 3) return null
+    pos += type === 1 ? 1 : size
+    if (pos > buf.length) return { truncated: true }
+    if (last) {
+      if (checksum) pos += 4
+      if (pos > buf.length) return { truncated: true }
+      return { end: pos }
+    }
+  }
+  return { truncated: true }
 }
 
 export function repairZstd(buf) {
@@ -94,6 +111,12 @@ export function readSessionHeader(buf, zstd) {
   } catch {
     return null
   }
+}
+
+export function decompressZstdFrames(buf) {
+  const info = inspectZstd(buf)
+  if (!info.frames.length) throw new Error('no frame')
+  return Buffer.concat(info.frames.map((frame) => Buffer.from(zstdDecompressSync(buf.subarray(frame.start, frame.end)))))
 }
 
 function firstFrame(buf) {

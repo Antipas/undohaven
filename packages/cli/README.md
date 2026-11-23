@@ -14,7 +14,15 @@ undohaven snapshot
 undohaven s3 keys create --bucket undohaven
 undohaven list
 undohaven restore --to SNAPSHOT_ID --scope all
+undohaven restore --to SNAPSHOT_ID --scope tasks
+undohaven restore --to SNAPSHOT_ID --scope session --session SESSION_ID
 ```
+
+`--scope tasks` puts scheduled tasks from the snapshot back and leaves tasks that were created later. `--scope session` writes that one session back and lists it again. Other sessions stay as they are.
+
+If dsh will not start, `undohaven rescue` lists local snapshots and `undohaven rescue --to SNAPSHOT_ID` writes that profile's `package.json`, `pnpm-lock.yaml`, and `cordis.patch.yml` back. It does not need dsh to be running. Quit dsh first if it is still up.
+
+`undohaven guard history <plugin>` lists every recorded point for that plugin. `undohaven guard rollback <plugin> --to <snapshot-or-version>` puts that one package spec back. Pro is required for rollback. A scan or diff prints the plugin's declared capabilities, including `dshhub.permissions.network`, and what changed since the previous version. UndoHaven is an unofficial third-party tool compatible with dsh. It is not affiliated with dsh's authors.
 
 Losing both the passphrase and the recovery code means the encrypted copy cannot be opened. There is no reset.
 
@@ -37,7 +45,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 
 const account = privateKeyToAccount(process.env.X402_PAYER_KEY)
 const paidFetch = wrapFetchWithPaymentFromConfig(fetch, {
-  schemes: [{ network: 'eip155:84532', client: new ExactEvmScheme(account) }],
+  schemes: [{ network: 'eip155:8453', client: new ExactEvmScheme(account) }],
 })
 
 const response = await paidFetch('https://undohaven.com/x402/snapshot', {

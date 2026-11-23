@@ -11,6 +11,7 @@ import {
   exportArchive,
   UPGRADE,
   readPrompts,
+  decryptManifest,
   readSnapshotRecord,
   reportAnonymousEvent,
   showLimitNudge,
@@ -30,12 +31,20 @@ import {
   resolveDataDir,
   resolveDshHome,
   restoreSnapshot,
+  pinSnapshot,
+  scanGuard,
+  rollbackGuard,
+  listPluginHistory,
+  matchBlock,
+  loadBlocklist,
+  ROLLBACK_LIMIT,
   rotatePassphrase,
   saveConfig,
   collectPluginState,
   diffPluginState,
   installProfile,
   loadPluginState,
+  restoreOnePlugin,
   restorePluginState,
   savePluginState,
   saveKeyFile,
@@ -288,13 +297,18 @@ async function cmdRestore(ctx, flags) {
   if (!id) throw new HouhuiError('need_target', '请提供 --to <快照> 或 --local <文件>', 'Pass --to <snapshot> or --local <file>')
   const dek = await ensureDek(ctx)
   const { cloud } = localFile ? { cloud: null } : await cloudFor(ctx)
+  const scope = flags.scope || 'all'
+  if (!['sessions', 'storages', 'config', 'profile', 'all', 'tasks', 'session'].includes(scope)) {
+    throw new HouhuiError('bad_scope', '范围只能是 sessions、storages、config、profile、tasks、session 或 all', 'Scope must be sessions, storages, config, profile, tasks, session, or all')
+  }
   const result = await restoreSnapshot({
     dek,
     dataDir: ctx.dataDir,
     dshHome: ctx.dshHome,
     agentsHome: ctx.agentsHome,
     id,
-    scope: flags.scope || 'all',
+    scope,
+    session: flags.session,
     cloud,
     env: ctx.env,
   })
@@ -508,11 +522,11 @@ async function cmdExport(ctx, flags) {
 async function requireByo(ctx) {
   const { cloud } = await cloudFor(ctx)
   if (!cloud) {
-    throw new HouhuiError('byo_not_allowed', '自有存储是专业版。请先登录并开通试用或订阅。', 'Bring-your-own storage is Pro. Log in and start a trial or subscribe.', { exitCode: 4 })
+    throw new HouhuiError('byo_not_allowed', '自有存储是专业版。请先登录并开通试用或订阅。https://undohaven.com/zh/pricing?utm_source=cli', 'Bring-your-own storage is Pro. Log in and start a trial or subscribe. https://undohaven.com/pricing?utm_source=cli', { exitCode: 4 })
   }
   const account = await cloud.account()
   if (!account.features?.byoStorage) {
-    throw new HouhuiError('byo_not_allowed', '当前套餐不能使用自有存储。', 'This plan cannot use bring-your-own storage.', { exitCode: 4 })
+    throw new HouhuiError('byo_not_allowed', '当前套餐不能使用自有存储。https://undohaven.com/zh/pricing?utm_source=cli', 'This plan cannot use bring-your-own storage. https://undohaven.com/pricing?utm_source=cli', { exitCode: 4 })
   }
 }
 
@@ -603,6 +617,13 @@ async function cmdFunnel(ctx, positionals) {
   return 0
 }
 
+async function pluginsFromRecord(ctx, record) {
+  if (record?.plugins) return record.plugins
+  if (!record?.encryptedManifest) return null
+  const { dek } = await loadDek(ctx.dataDir)
+  return decryptManifest(record, dek).plugins || null
+}
+
 async function cmdPlugins(ctx, flags, positionals) {
   const action = positionals[0] || 'snapshot'
   if (action === 'snapshot') {
@@ -618,7 +639,7 @@ async function cmdPlugins(ctx, flags, positionals) {
   }
   if (action === 'diff' || action === 'restore') {
     const saved = flags.from
-      ? (await readSnapshotRecord(ctx.dataDir, flags.from))?.plugins
+      ? await pluginsFromRecord(ctx, await readSnapshotRecord(ctx.dataDir, flags.from))
       : await loadPluginState(ctx.dataDir)
     if (!saved) throw new HouhuiError('no_plugin_state', '还没有插件快照。', 'No plugin snapshot yet.')
     const current = await collectPluginState(ctx.dshHome)
@@ -672,6 +693,150 @@ async function cmdS3Keys(ctx, flags, positionals) {
   throw new HouhuiError('bad_s3', '用法：undohaven s3 keys create|list|revoke', 'Usage: undohaven s3 keys create, list, or revoke')
 }
 
+async function guardTier(ctx) {
+  const { cloud, config } = await cloudFor(ctx)
+  const apiBase = config.apiBase || ctx.apiBase || 'https://undohaven.com'
+  if (!cloud) return { tier: 'free', apiBase }
+  try {
+    const account = await cloud.account()
+    const pro = account.plan === 'pro' || account.features?.guardRealtime
+    return { tier: pro ? 'pro' : 'free', apiBase }
+  } catch {
+    return { tier: 'free', apiBase }
+  }
+}
+
+async function cmdRescue(ctx, flags, positionals) {
+  const action = positionals[0] && positionals[0] !== 'restore' ? positionals[0] : (flags.to ? 'restore' : 'list')
+  if (action === 'list' || action === 'ls') {
+    const rows = await listSnapshots({ dataDir: ctx.dataDir, allowCloudFailure: true })
+    const lines = rows.map((row) => `${row.createdAt}  ${row.id}  ${row.kind}  ${row.files ?? '?'} files`)
+    emit(ctx, { text: lines.join('\n') || bi('还没有快照。dsh 没启动也可以先拍一份。', 'No snapshots yet. You can take one even when dsh is not running.'), snapshots: rows })
+    return 0
+  }
+  const id = flags.to || positionals[1]
+  if (!id) throw new HouhuiError('need_target', '用法：undohaven rescue --to <快照>', 'Usage: undohaven rescue --to <snapshot>')
+  const dek = await ensureDek(ctx)
+  const result = await restoreSnapshot({
+    dek,
+    dataDir: ctx.dataDir,
+    dshHome: ctx.dshHome,
+    agentsHome: ctx.agentsHome,
+    id,
+    scope: 'profile',
+    env: ctx.env,
+  })
+  emit(ctx, {
+    text: bi(`已把 profile 的 package.json、pnpm-lock 和 cordis.patch.yml 写回到 ${result.id}。dsh 不需要在运行。`, `Wrote profile package.json, pnpm-lock, and cordis.patch.yml from ${result.id}. dsh does not need to be running.`),
+    ...result,
+  })
+  return 0
+}
+
+async function cmdGuard(ctx, flags, positionals) {
+  const action = positionals[0] || 'scan'
+  const { tier, apiBase } = await guardTier(ctx)
+  if (action === 'block') {
+    const spec = positionals[1] || ''
+    const blocklist = await loadBlocklist({ apiBase, tier, dataDir: ctx.dataDir })
+    if (!spec) {
+      const lines = (blocklist.entries || []).map((entry) => `${entry.name}@${(entry.versions || []).join(',')} ${entry.url}`)
+      emit(ctx, { text: lines.join('\n') || 'empty', entries: blocklist.entries })
+      return 0
+    }
+    const at = spec.lastIndexOf('@')
+    const name = at > 0 ? spec.slice(0, at) : spec
+    const version = at > 0 ? spec.slice(at + 1) : ''
+    const hit = matchBlock(blocklist.entries, name, version)
+    if (!hit) {
+      emit(ctx, { text: bi(`${spec} 不在拦截名单里。`, `${spec} is not on the blocklist.`), blocked: false })
+      return 0
+    }
+    emit(ctx, { text: bi(`拒绝安装或启用 ${spec}。${hit.url}`, `Refusing to install or enable ${spec}. ${hit.url}`), blocked: true, advisory: hit })
+    return 1
+  }
+  if (action === 'history') {
+    const name = positionals[1]
+    if (!name) throw new HouhuiError('need_plugin', '用法：undohaven guard history <plugin>', 'Usage: undohaven guard history <plugin>')
+    const history = await listPluginHistory(ctx.dataDir, name)
+    const lines = history.map((item) => `${item.at}  ${item.snapshotId}  ${item.spec}`)
+    emit(ctx, { text: lines.join('\n') || bi('还没有这个插件的回滚点。', 'No rollback points for this plugin yet.'), history })
+    return 0
+  }
+  if (action === 'rollback') {
+    const name = positionals[1]
+    if (!name) throw new HouhuiError('need_plugin', '用法：undohaven guard rollback <plugin> [--to <snapshot|version>]', 'Usage: undohaven guard rollback <plugin> [--to <snapshot|version>]')
+    const result = await rollbackGuard({
+      tier,
+      dataDir: ctx.dataDir,
+      name,
+      to: flags.to,
+      applyPlugin: async ({ id }) => {
+        const record = await readSnapshotRecord(ctx.dataDir, id)
+        const plugins = await pluginsFromRecord(ctx, record)
+        if (!plugins) throw new HouhuiError('no_plugin_state', '这份快照没有插件清单。', 'This snapshot has no plugin list.')
+        const changed = await restoreOnePlugin(ctx.dshHome, plugins, name)
+        return { id, scope: 'plugin', changed }
+      },
+    })
+    emit(ctx, {
+      text: bi(`已从 ${result.id} 恢复插件声明和 dsh 配置目录。${result.limitation}`, `Restored the plugin spec and dsh config directory from ${result.id}. ${result.limitation}`),
+      ...result,
+    })
+    return 0
+  }
+  if (action === 'diff' && tier !== 'pro') {
+    throw new HouhuiError('pro_required', '能力差异是专业版功能。免费版仍有基线扫描和每周名单。https://undohaven.com/zh/pricing?utm_source=cli', 'Capability diff is a Pro feature. Free still has the baseline scan and the weekly blocklist. https://undohaven.com/pricing?utm_source=cli', { exitCode: 4 })
+  }
+  let dek = null
+  if (tier === 'pro') {
+    const keys = await loadDek(ctx.dataDir)
+    dek = keys.dek
+  }
+  const result = await scanGuard({
+    tier,
+    apiBase,
+    dataDir: ctx.dataDir,
+    dshHome: ctx.dshHome,
+    createSnapshot: dek ? async (plugin) => createSnapshot({
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      dek,
+      env: ctx.env,
+      kind: 'pre-change',
+      tags: ['guard', plugin.name],
+    }) : null,
+    pinSnapshot: dek ? async (id) => pinSnapshot({ dataDir: ctx.dataDir, dshHome: ctx.dshHome, dek, env: ctx.env }, id) : null,
+  })
+  if (action === 'diff') {
+    const lines = result.changes.map((change) => formatGuardChange(change))
+    emit(ctx, { text: lines.join('\n') || bi('没有新的能力。', 'No new capabilities.'), changes: result.changes, blocked: result.blocked })
+    return result.blocked.length ? 1 : 0
+  }
+  const lines = [
+    `tier ${result.tier}`,
+    ...result.blocked.map((item) => `blocked ${item.name}@${item.version} ${item.advisory.url}`),
+    ...result.changes.map((item) => formatGuardChange(item)),
+    ROLLBACK_LIMIT,
+  ]
+  emit(ctx, { text: lines.filter(Boolean).join('\n'), tier: result.tier, blocked: result.blocked, changes: result.changes })
+  return result.blocked.length ? 1 : 0
+}
+
+function formatGuardChange(change) {
+  const bits = [
+    change.delta?.shell ? 'shell' : '',
+    change.delta?.credentials ? 'credentials' : '',
+    change.delta?.network ? 'network' : '',
+    ...(change.delta?.installScripts || []).map((item) => `install:${item}`),
+    ...(change.delta?.domains || []),
+    ...(change.declared || []).map((item) => `declared:${item}`),
+  ].filter(Boolean)
+  const from = change.from || 'new'
+  return `${change.name} ${from} -> ${change.to}: ${bits.join(', ') || 'no new shell, credentials, network, install script, or domain'}`
+}
+
 async function cmdTrial(ctx) {
   const { cloud } = await cloudFor(ctx)
   if (!cloud) throw new HouhuiError('login_required', '请先登录', 'Log in first')
@@ -690,7 +855,7 @@ function help() {
     'undohaven doctor',
     'undohaven snapshot [--include-credentials] [--tag name]',
     'undohaven list',
-    'undohaven restore --to <id> [--scope sessions|storages|config|all] [--local <file>]',
+    'undohaven restore --to <id> [--scope sessions|storages|config|tasks|session|all] [--session <id>] [--local <file>]',
     'undohaven login [--api URL] [--device-name name] [--recovery]',
     'undohaven logout',
     'undohaven trial',
@@ -698,6 +863,8 @@ function help() {
     'undohaven storage show | reset | set dir <path> | set s3 --endpoint --bucket --access-key-id',
     'undohaven s3 keys create|list|revoke',
     'undohaven plugins snapshot|restore|diff',
+    'undohaven rescue [list] | undohaven rescue --to <id>',
+    'undohaven guard scan|diff|history <plugin>|rollback <plugin> [--to <snapshot|version>]|block [name@version]',
     'undohaven migrate-machine --to <id>',
     'undohaven upgrade <version>',
     'undohaven export --local <file>',
@@ -729,6 +896,8 @@ export async function main(argv = process.argv) {
     if (command === 'storage') return await cmdStorage(ctx, flags, positionals)
     if (command === 's3') return await cmdS3Keys(ctx, flags, positionals)
     if (command === 'plugins') return await cmdPlugins(ctx, flags, positionals)
+    if (command === 'rescue') return await cmdRescue(ctx, flags, positionals)
+    if (command === 'guard') return await cmdGuard(ctx, flags, positionals)
     if (command === 'trial') return await cmdTrial(ctx)
     if (command === 'startup') {
       const { cloud } = await cloudFor(ctx)

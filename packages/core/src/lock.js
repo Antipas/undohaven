@@ -96,8 +96,8 @@ export function portOpen(port, host = '127.0.0.1') {
   })
 }
 
-async function collectLockFiles(root) {
-  const { readdir, stat } = await import('node:fs/promises')
+export async function collectLockFiles(root) {
+  const { readdir, lstat } = await import('node:fs/promises')
   const found = []
   async function walk(dir, depth) {
     if (depth > 8) return
@@ -112,10 +112,11 @@ async function collectLockFiles(root) {
       const abs = join(dir, entry)
       let st
       try {
-        st = await stat(abs)
+        st = await lstat(abs)
       } catch {
         continue
       }
+      if (st.isSymbolicLink()) continue
       if (st.isDirectory()) await walk(abs, depth + 1)
       else if (entry === 'session.lock' || abs.endsWith(`${join('profiles', 'desktop', 'lock')}`)) found.push(abs)
     }
@@ -123,7 +124,7 @@ async function collectLockFiles(root) {
   const desktop = join(root, 'profiles', 'desktop', 'lock')
   await walk(join(root, 'sessions'), 0)
   try {
-    const st = await stat(desktop)
+    const st = await lstat(desktop)
     if (st.isFile()) found.push(desktop)
   } catch {
     /* no desktop lock */

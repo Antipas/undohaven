@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
-import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { zstdCompressSync } from 'node:zlib'
 import {
   AVG_SIZE,
   CdcStream,
@@ -22,6 +22,7 @@ import {
   hmacChunkId,
   chunkIdKey,
   importArchive,
+  decompressZstdFrames,
   inspectZstd,
   listSnapshots,
   loadKeyFile,
@@ -228,7 +229,7 @@ test('snapshot repairs a truncated zstd tail, restores sqlite via backup, and ro
   workspace.unit.version = 9
   await writeFile(join(dsh, 'storages', 'workspace.json'), JSON.stringify(workspace))
   await restoreSnapshot({ dataDir: data, dshHome: dsh, agentsHome: agents, id: snap.id, dek: keys.dek, skipLockCheck: true, skipSafety: true })
-  const restored = zstdDecompressSync(await readFile(sessionPath)).toString('utf8')
+  const restored = decompressZstdFrames(await readFile(sessionPath)).toString('utf8')
   assert.match(restored, /alpha-memory/)
   assert.equal(JSON.parse(await readFile(join(dsh, 'storages', 'workspace.json'), 'utf8')).unit.version, 2)
   assert.equal(await readFile(join(dsh, 'skills', 'demo', 'SKILL.md'), 'utf8'), 'skill-alpha')

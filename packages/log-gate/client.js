@@ -11,7 +11,11 @@
         var status = state[0]
         var setStatus = state[1]
         React.useEffect(function () {
-          fetch('/api/log-gate/status').then(function (res) { return res.json() }).then(setStatus).catch(function () { setStatus(null) })
+          var token = ''
+          fetch('/api/log-gate/token').then(function (res) { return res.json() }).then(function (body) {
+            token = body.token || ''
+            return fetch('/api/log-gate/status', { headers: { 'x-undohaven-token': token } })
+          }).then(function (res) { return res.json() }).then(setStatus).catch(function () { setStatus(null) })
         }, [])
         var rows = ((status && status.sessions) || []).map(function (row) {
           return React.createElement('li', { key: row.id || row.cwd }, (row.blocked ? 'blocked / 已拦住 ' : 'eligible / 会上传 ') + (row.cwd || row.id || ''))

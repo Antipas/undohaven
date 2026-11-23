@@ -134,6 +134,28 @@ export function applyDisabledFlags(text, rows) {
   return next
 }
 
+export async function restoreOnePlugin(dshHome, state, pluginName) {
+  const changed = []
+  for (const [profile, body] of Object.entries(state?.profiles || {})) {
+    if (!body?.dependencies || !(pluginName in body.dependencies)) continue
+    const dir = join(dshHome, 'profiles', profile)
+    await mkdir(dir, { recursive: true })
+    const pkgPath = join(dir, 'package.json')
+    const pkg = await readJson(pkgPath) || { private: true }
+    pkg.dependencies = { ...(pkg.dependencies || {}), [pluginName]: body.dependencies[pluginName] }
+    stripWorkingDirectoryToolPackage(pkg)
+    await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+    const row = (body.rows || []).find((item) => item.id === pluginName || item.name === pluginName)
+    if (row) {
+      const patchPath = join(dir, 'cordis.patch.yml')
+      const patch = stripWorkingDirectoryToolYaml(applyDisabledFlags(await readText(patchPath), [row])).text
+      await writeFile(patchPath, patch.endsWith('\n') ? patch : `${patch}\n`)
+    }
+    changed.push({ profile, spec: body.dependencies[pluginName] })
+  }
+  return changed
+}
+
 export async function restorePluginState(dshHome, state) {
   const changed = []
   for (const [name, profile] of Object.entries(state?.profiles || {})) {

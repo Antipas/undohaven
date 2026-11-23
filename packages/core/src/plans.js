@@ -14,6 +14,7 @@ export const PLANS = {
     credentialBackup: false,
     crossMajorDowngrade: false,
     byoStorage: false,
+    guardRealtime: false,
   },
   pro: {
     id: 'pro',
@@ -25,6 +26,7 @@ export const PLANS = {
     credentialBackup: true,
     crossMajorDowngrade: true,
     byoStorage: true,
+    guardRealtime: true,
   },
 }
 

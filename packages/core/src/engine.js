@@ -27,6 +27,7 @@ import { scanRoot } from './scan.js'
 import { repairJsonl, repairZstd } from './session.js'
 import { snapshotSqlite } from './sqlite.js'
 import {
+  atomicWrite,
   hasLocalChunk,
   listSnapshotRecords,
   putLocalChunk,
@@ -35,7 +36,8 @@ import {
   readSnapshotRecord,
   writeSnapshotRecord,
 } from './store.js'
-import { loadStorageConfig } from './byo.js'
+import { isWatchedStorage } from './items.js'
+import { loadStorageConfig, padBlob, unpadBlob } from './byo.js'
 import { detectDshVersions } from './versions.js'
 import { stripRemovedWorkingDirectoryTool } from './compat.js'
 import { collectPluginState, savePluginState } from './plugins.js'
@@ -44,11 +46,21 @@ const require = createRequire(import.meta.url)
 const TOOL_VERSION = require('../package.json').version
 const EXPORT_MAGIC = Buffer.from('UHV1')
 
-function inScope(entry, scope) {
+function inScope(entry, scope, opts = {}) {
   if (scope === 'all') return true
   const rel = entry.rel
   if (scope === 'sessions') return entry.root === 'dsh' && rel.startsWith('sessions/')
   if (scope === 'storages') return entry.root === 'dsh' && rel.startsWith('storages/')
+  if (scope === 'tasks') return entry.root === 'dsh' && rel === 'storages/schedule.json'
+  if (scope === 'session') {
+    if (entry.root !== 'dsh' || !rel.startsWith('sessions/')) return false
+    const id = opts.session
+    if (!id) return false
+    return rel.split('/').includes(id)
+  }
+  if (scope === 'profile') {
+    return entry.root === 'dsh' && /^profiles\/[^/]+\/(?:package\.json|pnpm-lock\.yaml|cordis\.patch\.yml)$/.test(rel)
+  }
   if (scope === 'config') {
     if (entry.root === 'agents') return true
     if (entry.root !== 'dsh') return false
@@ -58,7 +70,7 @@ function inScope(entry, scope) {
     const base = rel.split('/')[0]
     return !['sessions', 'storages', 'profiles', 'skills', 'attachments', 'cache'].includes(base)
   }
-  throw new HouhuiError('bad_scope', '范围只能是 sessions、storages、config 或 all', 'Scope must be sessions, storages, config, or all')
+  throw new HouhuiError('bad_scope', '范围只能是 sessions、storages、config、profile、tasks、session 或 all', 'Scope must be sessions, storages, config, profile, tasks, session, or all')
 }
 
 async function exists(path) {
@@ -79,6 +91,9 @@ export async function cloudFromConfig(dataDir, override) {
 }
 
 async function readBackupSource(file) {
+  if (file.bytes) {
+    return { buffer: file.bytes, cleanup: async () => {}, repaired: false, sqlite: false }
+  }
   if (file.sqlite) {
     const snap = await snapshotSqlite(file.abs)
     return { path: snap.path, cleanup: snap.cleanup, repaired: false, sqlite: true }
@@ -109,7 +124,7 @@ async function sealPieces(dataDir, pieces, dek) {
     if (!unique.has(id)) {
       const sealed = seal(encKey, piece)
       await putLocalChunk(dataDir, id, sealed)
-      unique.set(id, sealed.length)
+      unique.set(id, padBlob(sealed).length)
       stored += sealed.length
     }
     ids.push(id)
@@ -136,10 +151,24 @@ export async function createSnapshot(opts) {
   const { dek } = opts.dek ? { dek: opts.dek } : await loadDek(dataDir)
   const includeCredentials = !!opts.includeCredentials
   const versions = await detectDshVersions({ dshHome: opts.dshHome, dshPrefix: opts.dshPrefix, env: opts.env })
-  const files = [
+  let files = [
     ...(await scanRoot(opts.dshHome, 'dsh', { includeCredentials })),
     ...(opts.agentsHome ? await scanRoot(opts.agentsHome, 'agents', { includeCredentials }) : []),
   ]
+  if (typeof opts.select === 'function') files = files.filter((file) => opts.select(file))
+  for (const extra of opts.extraFiles || []) {
+    files.push({
+      root: extra.root || 'dsh',
+      rel: extra.rel,
+      abs: extra.abs,
+      bytes: extra.bytes,
+      mtimeMs: extra.mtimeMs || Date.now(),
+      mode: extra.mode || 0o600,
+      size: extra.bytes ? extra.bytes.length : 0,
+      sqlite: false,
+      session: false,
+    })
+  }
   const entries = []
   const unique = new Map()
   const warnings = []
@@ -187,7 +216,15 @@ export async function createSnapshot(opts) {
     includeCredentials,
     entries,
   }
-  const encrypted = seal(manifestKey(dek), Buffer.from(JSON.stringify(manifest)))
+  let plugins = null
+  try {
+    plugins = await collectPluginState(opts.dshHome)
+    await savePluginState(dataDir, plugins)
+  } catch {
+    plugins = null
+  }
+  manifest.plugins = plugins
+  const encrypted = padBlob(seal(manifestKey(dek), Buffer.from(JSON.stringify(manifest))))
   let bytes = encrypted.length
   for (const size of unique.values()) bytes += size
   const record = {
@@ -205,60 +242,21 @@ export async function createSnapshot(opts) {
     chunkIds: [...unique.keys()],
     pinned: kind === 'pre-upgrade',
     cloud: false,
+    plugins,
   }
-  try {
-    const plugins = await collectPluginState(opts.dshHome)
-    record.plugins = plugins
-    await savePluginState(dataDir, plugins)
-  } catch {
-    record.plugins = null
+  if (plugins) {
+    try {
+      const { notePluginPoints } = await import('./guard.js')
+      await notePluginPoints(dataDir, id, plugins)
+    } catch {
+      /* the snapshot still has the plugin list if the history index cannot be written */
+    }
   }
   await writeSnapshotRecord(dataDir, record)
   let cloudError = null
   if (opts.cloud) {
     try {
-      if (includeCredentials) {
-        const account = await opts.cloud.account()
-        if (!account.features?.credentialBackup) {
-          throw new HouhuiError('credentials_not_allowed', '当前套餐不能备份凭据', 'This plan cannot back up credentials', { exitCode: 4 })
-        }
-      }
-      const storage = await loadStorageConfig(dataDir)
-      const byo = storage.mode === 's3' || storage.mode === 'dir'
-      const created = byo
-        ? await opts.cloud.createSnapshot({
-          id,
-          createdAt,
-          kind,
-          bytes,
-          chunkIds: [],
-          byo: true,
-          dshVersion: versions.dshVersion,
-          includesCredentials: includeCredentials,
-          encryptedManifest: record.encryptedManifest,
-          pinned: record.pinned,
-        })
-        : await (async () => {
-          const missing = await opts.cloud.missing(record.chunkIds)
-          for (const chunkId of missing) {
-            await opts.cloud.uploadChunk(chunkId, await readPaddedChunk(dataDir, chunkId))
-          }
-          return opts.cloud.createSnapshot({
-            id,
-            createdAt,
-            kind,
-            bytes,
-            chunkIds: record.chunkIds,
-            dshVersion: versions.dshVersion,
-            includesCredentials: includeCredentials,
-            encryptedManifest: record.encryptedManifest,
-            pinned: record.pinned,
-          })
-        })()
-      record.pruned = Number(created?.pruned || 0)
-      record.plan = created?.plan || null
-      record.cloud = true
-      await writeSnapshotRecord(dataDir, record)
+      await publishSnapshot(dataDir, record, opts.cloud)
     } catch (error) {
       cloudError = error
     }
@@ -266,8 +264,78 @@ export async function createSnapshot(opts) {
   return { ...record, warnings, cloudError, manifest }
 }
 
+export async function publishSnapshot(dataDir, record, cloud) {
+  if (!cloud || record.cloud) return record
+  if (record.includesCredentials) {
+    const account = await cloud.account()
+    if (!account.features?.credentialBackup) {
+      throw new HouhuiError('credentials_not_allowed', '当前套餐不能备份凭据', 'This plan cannot back up credentials', { exitCode: 4 })
+    }
+  }
+  const storage = await loadStorageConfig(dataDir)
+  const byo = storage.mode === 's3' || storage.mode === 'dir'
+  const created = byo
+    ? await cloud.createSnapshot({
+      id: record.id,
+      createdAt: record.createdAt,
+      kind: record.kind,
+      bytes: record.bytes,
+      chunkIds: [],
+      byo: true,
+      dshVersion: record.dshVersion,
+      includesCredentials: !!record.includesCredentials,
+      encryptedManifest: record.encryptedManifest,
+      pinned: !!record.pinned,
+    })
+    : await (async () => {
+      const missing = await cloud.missing(record.chunkIds || [])
+      for (const chunkId of missing) {
+        await cloud.uploadChunk(chunkId, await readPaddedChunk(dataDir, chunkId))
+      }
+      return cloud.createSnapshot({
+        id: record.id,
+        createdAt: record.createdAt,
+        kind: record.kind,
+        bytes: record.bytes,
+        chunkIds: record.chunkIds,
+        dshVersion: record.dshVersion,
+        includesCredentials: !!record.includesCredentials,
+        encryptedManifest: record.encryptedManifest,
+        pinned: !!record.pinned,
+      })
+    })()
+  record.pruned = Number(created?.pruned || 0)
+  record.plan = created?.plan || null
+  record.cloud = true
+  await writeSnapshotRecord(dataDir, record)
+  return record
+}
+
+export async function uploadPendingLocal(opts) {
+  const records = await listSnapshotRecords(opts.dataDir)
+  const uploaded = []
+  for (const record of records) {
+    if (record.cloud || record.includesCredentials) continue
+    if (!(record.tags || []).includes('pre-change')) continue
+    await publishSnapshot(opts.dataDir, record, opts.cloud)
+    uploaded.push(record.id)
+  }
+  return uploaded
+}
+
+async function accountIsPro(cloud) {
+  if (!cloud?.account) return false
+  try {
+    const account = await cloud.account()
+    return account.plan === 'pro' || !!account.features?.guardRealtime || !!account.features?.machineMigration
+  } catch {
+    return false
+  }
+}
+
 export function decryptManifest(record, dek) {
-  const json = open(manifestKey(dek), fromB64(record.encryptedManifest)).toString('utf8')
+  const stored = unpadBlob(fromB64(record.encryptedManifest))
+  const json = open(manifestKey(dek), stored).toString('utf8')
   return JSON.parse(json)
 }
 
@@ -373,6 +441,24 @@ async function materializeRecord(opts, id, purpose) {
   return { record, manifest, dek }
 }
 
+async function readPlain(dataDir, entry, dek) {
+  const encKey = chunkEncKey(dek)
+  const idKey = chunkIdKey(dek)
+  const parts = []
+  for (const chunkId of entry.chunks) {
+    const plain = open(encKey, await readLocalChunk(dataDir, chunkId))
+    if (hmacChunkId(idKey, plain) !== chunkId) {
+      throw new HouhuiError('chunk_mismatch', `分块 ${chunkId} 和内容对不上`, `Chunk ${chunkId} does not match its plaintext`)
+    }
+    parts.push(plain)
+  }
+  const bytes = Buffer.concat(parts)
+  if (sha256(bytes) !== entry.sha256) {
+    throw new HouhuiError('checksum_mismatch', `文件校验失败：${entry.rel}`, `Checksum mismatch for ${entry.rel}`)
+  }
+  return bytes
+}
+
 async function writeEntry(dataDir, entry, dek, roots) {
   const encKey = chunkEncKey(dek)
   const idKey = chunkIdKey(dek)
@@ -428,6 +514,9 @@ async function deleteExtras(roots, manifestEntries, scope) {
 
 export async function restoreSnapshot(opts) {
   const scope = opts.scope || 'all'
+  if (scope === 'session' && !/^[\w.-]{1,128}$/.test(opts.session || '')) {
+    throw new HouhuiError('need_session', '请提供会话编号', 'Pass a session id')
+  }
   if (!opts.skipLockCheck) await assertDshStopped(opts.dshHome, opts.env)
   const purpose = opts.purpose
   let safety = null
@@ -438,22 +527,65 @@ export async function restoreSnapshot(opts) {
       kind: 'safety',
       tags: ['safety', 'before-restore'],
       includeCredentials: false,
+      select: undefined,
+      extraFiles: undefined,
     })
     if (safety.cloudError && opts.cloud) {
       /* local safety snapshot still exists; cloud failure is reported */
     }
   }
   const { manifest, dek } = await materializeRecord(opts, opts.id, purpose)
-  const selected = manifest.entries.filter((entry) => inScope(entry, scope))
-  await deleteExtras({ dsh: opts.dshHome, agents: opts.agentsHome }, manifest.entries, scope)
+  if (scope === 'tasks') {
+    const entry = manifest.entries.find((item) => inScope(item, 'tasks'))
+    if (!entry) {
+      throw new HouhuiError('no_tasks', '这份快照里没有定时任务', 'This snapshot has no scheduled tasks')
+    }
+    const saved = JSON.parse((await readPlain(opts.dataDir, entry, dek)).toString('utf8'))
+    const { mergeScheduleDocument } = await import('./items.js')
+    const merged = await mergeScheduleDocument(opts.dshHome, saved)
+    return {
+      id: manifest.id,
+      files: 1,
+      scope,
+      tasks: merged.restored,
+      safetyId: safety?.id ?? null,
+      safetyCloudError: safety?.cloudError ?? null,
+      compat: [],
+    }
+  }
+  const selected = manifest.entries.filter((entry) => inScope(entry, scope, opts))
+  if (scope === 'session' && selected.length === 0) {
+    throw new HouhuiError('no_session', '这份快照里没有这个会话', `This snapshot has no session ${opts.session}`)
+  }
+  if (scope !== 'session') {
+    await deleteExtras({ dsh: opts.dshHome, agents: opts.agentsHome }, manifest.entries, scope)
+  }
   for (const entry of selected) {
     await writeEntry(opts.dataDir, entry, dek, { dsh: opts.dshHome, agents: opts.agentsHome })
+  }
+  let listed = []
+  if (scope === 'session') {
+    const workspace = manifest.entries.find((entry) => entry.root === 'dsh' && entry.rel === 'storages/workspace.json')
+    if (workspace) {
+      const saved = JSON.parse((await readPlain(opts.dataDir, workspace, dek)).toString('utf8'))
+      const { mergeSessionListing } = await import('./items.js')
+      listed = await mergeSessionListing(opts.dshHome, saved, opts.session)
+    }
   }
   let compat = []
   if (scope === 'all' || scope === 'config') {
     compat = await stripRemovedWorkingDirectoryTool(opts.dshHome)
   }
-  return { id: manifest.id, files: selected.length, scope, safetyId: safety?.id ?? null, safetyCloudError: safety?.cloudError ?? null, compat }
+  return {
+    id: manifest.id,
+    files: selected.length,
+    scope,
+    session: opts.session || null,
+    listed,
+    safetyId: safety?.id ?? null,
+    safetyCloudError: safety?.cloudError ?? null,
+    compat,
+  }
 }
 
 export async function pinSnapshot(opts, id) {
@@ -478,7 +610,7 @@ export async function pinSnapshot(opts, id) {
   record.kind = 'pre-upgrade'
   record.tags = manifest.tags
   record.pinned = true
-  record.encryptedManifest = b64(seal(manifestKey(dek), Buffer.from(JSON.stringify(manifest))))
+  record.encryptedManifest = b64(padBlob(seal(manifestKey(dek), Buffer.from(JSON.stringify(manifest)))))
   await writeSnapshotRecord(opts.dataDir, record)
   if (opts.cloud) {
     await opts.cloud.pinSnapshot(id, {
@@ -499,13 +631,30 @@ export async function pinSnapshot(opts, id) {
 export async function onRuntimeStart(opts) {
   const versions = await detectDshVersions({ dshHome: opts.dshHome, dshPrefix: opts.dshPrefix, env: opts.env })
   const state = await loadState(opts.dataDir)
+  let prechange = null
+  try {
+    const { captureStorageChanges } = await import('./watch.js')
+    prechange = await captureStorageChanges({ ...opts, cloud: null, includeCredentials: false })
+  } catch {
+    prechange = null
+  }
   let pinned = null
+  let versionSnapshot = null
   if (state.lastBaseVersion && state.lastBaseVersion !== versions.dshBaseVersion) {
     const rows = await listSnapshots({ dataDir: opts.dataDir, cloud: opts.cloud, dek: opts.dek, allowCloudFailure: true })
     const previous = rows.filter((row) => row.dshBaseVersion === state.lastBaseVersion)
     const target = previous.at(-1)
     if (target && target.kind !== 'pre-upgrade') pinned = await pinSnapshot(opts, target.id)
     else if (target) pinned = target
+    const paid = (await accountIsPro(opts.cloud)) ? opts.cloud : null
+    versionSnapshot = await createSnapshot({
+      ...opts,
+      cloud: paid,
+      kind: 'pre-upgrade',
+      tags: ['startup', 'version-change', state.lastBaseVersion || ''],
+      includeCredentials: false,
+      select: (file) => isWatchedStorage(file.rel),
+    })
   }
   const today = new Date().toISOString().slice(0, 10)
   const rows = await listSnapshots({ dataDir: opts.dataDir, dek: opts.dek, allowCloudFailure: true })
@@ -514,7 +663,7 @@ export async function onRuntimeStart(opts) {
   const snapshot = await createSnapshot({ ...opts, kind, tags: ['startup', kind] })
   state.lastBaseVersion = versions.dshBaseVersion
   await saveState(opts.dataDir, state)
-  return { snapshot, pinned, versions }
+  return { snapshot, pinned, versions, versionSnapshot, prechange }
 }
 
 export async function exportArchive(file, opts) {

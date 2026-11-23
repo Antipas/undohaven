@@ -31,9 +31,21 @@
         var setCode = codeState[1]
         var busy = busyState[0]
         var setBusy = busyState[1]
+        var sessionState = React.useState('')
+        var sessionId = sessionState[0]
+        var setSessionId = sessionState[1]
+        var token = ''
+        function authHeaders(extra) {
+          var headers = {}
+          if (token) headers['x-undohaven-token'] = token
+          if (extra) {
+            for (var key in extra) headers[key] = extra[key]
+          }
+          return headers
+        }
 
         function refresh() {
-          return fetch('/api/undohaven/status').then(function (res) { return res.json() }).then(function (body) {
+          return fetch('/api/undohaven/status', { headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
             setStatus(body)
             if (body.apiBase) setApiBase(body.apiBase)
           }).catch(function (error) {
@@ -41,30 +53,40 @@
           })
         }
         function refreshList() {
-          return fetch('/api/undohaven/snapshots').then(function (res) { return res.json() }).then(function (body) {
+          return fetch('/api/undohaven/snapshots', { headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
             setSnapshots(body.snapshots || [])
           }).catch(function () { setSnapshots([]) })
         }
         React.useEffect(function () {
-          refresh()
-          refreshList()
+          fetch('/api/undohaven/token').then(function (res) { return res.json() }).then(function (body) {
+            token = body.token || ''
+            return Promise.all([refresh(), refreshList()])
+          }).catch(function (error) { setMessage(String(error.message || error)) })
         }, [])
 
         function backup() {
           setBusy(true)
-          fetch('/api/undohaven/snapshot', { method: 'POST' }).then(function (res) { return res.json() }).then(function (body) {
+          fetch('/api/undohaven/snapshot', { method: 'POST', headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
             setMessage(body.ok ? '已备份 / Snapshot saved: ' + body.id : (body.error || 'failed'))
             return refreshList()
           }).finally(function () { setBusy(false) })
         }
-        function planRestore(id) {
-          fetch('/api/undohaven/restore-plan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: id, scope: 'all' }) })
+        function planRestore(id, scope) {
+          var body = { id: id, scope: scope || 'all' }
+          if (body.scope === 'session') {
+            if (!sessionId) {
+              setMessage('请填写会话编号 / Enter a session id')
+              return
+            }
+            body.session = sessionId
+          }
+          fetch('/api/undohaven/restore-plan', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify(body) })
             .then(function (res) { return res.json() })
-            .then(function (body) { setMessage((body.zh || '') + ' ' + (body.command || '')) })
+            .then(function (payload) { setMessage((payload.zh || '') + ' ' + (payload.en || '') + ' ' + (payload.command || '')) })
         }
         function startLogin() {
           setBusy(true)
-          fetch('/api/undohaven/login/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ apiBase: apiBase }) })
+          fetch('/api/undohaven/login/start', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify({ apiBase: apiBase }) })
             .then(function (res) { return res.json() })
             .then(function (body) {
               if (body.error) { setMessage((body.zh || '') + ' / ' + (body.en || '')); return }
@@ -74,14 +96,14 @@
             .finally(function () { setBusy(false) })
         }
         function poll() {
-          fetch('/api/undohaven/login/poll').then(function (res) { return res.json() }).then(function (body) {
+          fetch('/api/undohaven/login/poll', { headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
             setMessage(body.pending ? '等待授权 / Waiting for approval' : '已授权，输入口令 / Authorized, enter the passphrase')
             if (!body.pending) setCode(Object.assign({}, code || {}, { authorized: true }))
           })
         }
         function finish() {
           setBusy(true)
-          fetch('/api/undohaven/login/finish', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ passphrase: passphrase }) })
+          fetch('/api/undohaven/login/finish', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify({ passphrase: passphrase }) })
             .then(function (res) { return res.json() })
             .then(function (body) {
               var words = body.recoveryWords ? body.recoveryWords.join(' ') : ''
@@ -100,7 +122,11 @@
             ' ',
             row.createdAt,
             ' ',
-            React.createElement('button', { type: 'button', onClick: function () { planRestore(row.id) } }, '恢复向导 / Restore wizard'))
+            React.createElement('button', { type: 'button', onClick: function () { planRestore(row.id, 'all') } }, '恢复向导 / Restore wizard'),
+            ' ',
+            React.createElement('button', { type: 'button', onClick: function () { planRestore(row.id, 'tasks') } }, '只恢复定时任务 / Restore only scheduled tasks'),
+            ' ',
+            React.createElement('button', { type: 'button', onClick: function () { planRestore(row.id, 'session') } }, '恢复这个会话 / Restore this session'))
         })
         return React.createElement('section', { style: { display: 'grid', gap: '12px', maxWidth: '720px' } },
           React.createElement('h2', { style: { margin: 0 } }, 'UndoHaven'),
@@ -109,11 +135,14 @@
             status ? (status.zh || '') : '正在读取',
             status ? (status.en || '') : 'Loading'
           )),
-          status && status.upgrade ? React.createElement('p', null, (status.upgrade.zh || '') + ' / ' + (status.upgrade.en || '')) : null,
+          React.createElement('p', null, React.createElement('a', { href: 'https://undohaven.com/pricing?utm_source=plugin' }, 'Pro'), ' · ', React.createElement('a', { href: 'https://undohaven.com/zh/pricing?utm_source=plugin' }, '专业版')),
+          status && status.upgrade ? React.createElement('p', null, (status.upgrade.zh || '') + ' / ' + (status.upgrade.en || '') + ' https://undohaven.com/pricing?utm_source=plugin') : null,
           status && status.lastError ? React.createElement('p', null, status.lastError) : null,
           message ? React.createElement('p', null, message) : null,
           React.createElement('button', { type: 'button', disabled: busy, onClick: backup }, '立即备份 / Back up now'),
           React.createElement('ul', null, rows.length ? rows : React.createElement('li', null, bi('还没有快照', 'No snapshots yet'))),
+          React.createElement('label', null, bi('会话编号', 'Session id'),
+            React.createElement('input', { value: sessionId, onChange: function (event) { setSessionId(event.target.value) }, style: { display: 'block', width: '100%', marginTop: '4px' } })),
           React.createElement('label', null, bi('服务地址', 'Service URL'),
             React.createElement('input', { value: apiBase, onChange: function (event) { setApiBase(event.target.value) }, style: { display: 'block', width: '100%', marginTop: '4px' } })),
           React.createElement('button', { type: 'button', disabled: busy, onClick: startLogin }, '登录 / Log in'),

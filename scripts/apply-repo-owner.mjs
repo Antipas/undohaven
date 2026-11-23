@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Copy repo.config.json into the four public package.json files. Replace owner there, then run this. */
+/** Copy repo.config.json into the public package.json files. Replace owner there, then run this. */
 import { readFile, writeFile } from 'node:fs/promises'
 
 const config = JSON.parse(await readFile(new URL('../repo.config.json', import.meta.url), 'utf8'))
@@ -10,6 +10,7 @@ const packages = [
   ['packages/cli/package.json', 'packages/cli', config.homepage],
   ['packages/plugin/package.json', 'packages/plugin', config.homepage],
   ['packages/log-gate/package.json', 'packages/log-gate', config.logGateHomepage],
+  ['packages/pi/package.json', 'packages/pi', config.homepage],
 ]
 for (const [file, directory, homepage] of packages) {
   const pkg = JSON.parse(await readFile(file, 'utf8'))

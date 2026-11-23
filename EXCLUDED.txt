@@ -7,6 +7,9 @@ Excluded from this public export:
 - test/e2e and the private test harness (they start the Worker). test/harness.js here is a CLI-only stub for packages/core/test/byo.test.js.
 - the private monorepo lockfile and GitHub Actions workflow
 - deploy metadata and any Stripe secrets (none are in this tree)
+- the private README deploy section (Cloudflare account id, zone id, D1 id, R2 bucket name)
 
-Included on purpose: client source, tests, READMEs, MIT license, CONTRIBUTING, apply-repo-owner.mjs, and a root dsh.bundle entry for github:Antipas/undohaven.
-The public GitHub owner is Antipas. npm package tarballs still carry a repository OWNER placeholder; that will be fixed in the next npm release, not in this export.
+Included on purpose: client source, tests, READMEs, MIT license, CONTRIBUTING, apply-repo-owner.mjs, pi-undohaven, and a root dsh.bundle entry for github:Antipas/undohaven.
+
+This export is the client subset of 929165ca164ce8df16ca8cef7b03db8bcde6af02: undohaven-core 0.1.15, undohaven 0.1.14, dsh-undohaven 0.1.12, pi-undohaven 0.1.2, dsh-log-gate 0.1.7.
+The public GitHub owner is Antipas.

@@ -177,9 +177,18 @@ export async function hasBlob(dataDir, id) {
   }
 }
 
+export function byoIndexRecord(record) {
+  return {
+    id: record.id,
+    createdAt: record.createdAt,
+    encryptedManifest: record.encryptedManifest,
+    chunkIds: Array.isArray(record.chunkIds) ? record.chunkIds : [],
+  }
+}
+
 export async function writeByoRecord(dataDir, record) {
   const cfg = await loadStorageConfig(dataDir)
-  const json = JSON.stringify(record)
+  const json = JSON.stringify(byoIndexRecord(record))
   if (cfg.mode === 's3') {
     const response = await s3Call(cfg.s3, 'PUT', `m/${record.id}.json`, Buffer.from(json))
     if (!response.ok) throw new HouhuiError('s3_put', '写入清单到自有存储失败', `Writing the manifest to your bucket failed (${response.status})`)

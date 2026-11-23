@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import vm from 'node:vm'
 import { establishKeys, listSnapshots } from 'undohaven-core'
 import { Config, createRuntime, mount } from '../index.js'
+import { TOKEN_HEADER } from '../route-guard.js'
 
 const PASSPHRASE = 'correct horse battery'
 
@@ -62,7 +63,23 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   const unmount = mount(ctx.connection, runtime)
   assert.equal(webHits.length, 0)
   assert.ok(ctx.connection.routes.some((route) => route.path === '/api/undohaven/status' && route.methods.includes('GET')))
-  const status = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/status').fetch(new Request('http://127.0.0.1/api/undohaven/status'))
+  const tokenFile = join(data, 'route-token')
+  const tokenStat = await stat(tokenFile)
+  assert.equal(tokenStat.mode & 0o777, 0o600)
+  const token = (await readFile(tokenFile, 'utf8')).trim()
+  const local = (url, init = {}) => new Request(url, {
+    ...init,
+    headers: { origin: 'http://127.0.0.1', [TOKEN_HEADER]: token, ...(init.headers || {}) },
+  })
+  const blocked = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/status').fetch(new Request('http://127.0.0.1/api/undohaven/status', {
+    headers: { origin: 'https://evil.example', [TOKEN_HEADER]: token },
+  }))
+  assert.equal(blocked.status, 403)
+  const missing = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/status').fetch(local('http://127.0.0.1/api/undohaven/status', {
+    headers: { [TOKEN_HEADER]: '' },
+  }))
+  assert.equal(missing.status, 403)
+  const status = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/status').fetch(local('http://127.0.0.1/api/undohaven/status'))
   assert.equal(status.status, 200)
   assert.equal((await status.json()).unlocked, true)
   const bare = mount(null, runtime)
@@ -71,7 +88,7 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   const skipped = mount({ fetch: {} }, runtime)
   skipped()
   assert.equal(webHits.length, 0)
-  const plan = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/restore-plan').fetch(new Request('http://127.0.0.1/api/undohaven/restore-plan', {
+  const plan = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/restore-plan').fetch(local('http://127.0.0.1/api/undohaven/restore-plan', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id: 'snap_abc', scope: 'sessions' }),
@@ -79,6 +96,18 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   const planBody = await plan.json()
   assert.match(planBody.command, /undohaven restore --to snap_abc --scope sessions/)
   assert.match(planBody.zh, /退出/)
+  const tasks = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/restore-plan').fetch(local('http://127.0.0.1/api/undohaven/restore-plan', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'snap_abc', scope: 'tasks' }),
+  }))
+  assert.match((await tasks.json()).command, /--scope tasks$/)
+  const one = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/restore-plan').fetch(local('http://127.0.0.1/api/undohaven/restore-plan', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: 'snap_abc', scope: 'session', session: 'sess-1' }),
+  }))
+  assert.match((await one.json()).command, /--scope session --session sess-1/)
   unmount()
   await runtime.shutdown()
   await rm(root, { recursive: true, force: true })
@@ -121,4 +150,6 @@ test('client bundle registers a settings tab', async () => {
   plugin.apply(ctx)
   assert.equal(registered[0].id, 'undohaven')
   assert.match(registered[0].label, /后悔药/)
+  assert.match(code, /Restore only scheduled tasks/)
+  assert.match(code, /Restore this session/)
 })

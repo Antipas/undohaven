@@ -1,12 +1,21 @@
 {
   "name": "dsh-log-gate",
-  "version": "0.1.4",
+  "version": "0.1.7",
   "type": "module",
   "description": "Unofficial third-party gate for dsh session-log upload.",
   "engines": {
     "node": ">=24.9.0",
     "dsh": ">=0.2.1-rc.5 <0.3.0"
   },
+  "files": [
+    "index.js",
+    "client.js",
+    "bin",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "bin": {
     "dsh-log-gate": "./bin/dsh-log-gate.js"
   },

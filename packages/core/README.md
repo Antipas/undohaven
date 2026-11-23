@@ -27,7 +27,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 
 const account = privateKeyToAccount(process.env.X402_PAYER_KEY)
 const paidFetch = wrapFetchWithPaymentFromConfig(fetch, {
-  schemes: [{ network: 'eip155:84532', client: new ExactEvmScheme(account) }],
+  schemes: [{ network: 'eip155:8453', client: new ExactEvmScheme(account) }],
 })
 
 const response = await paidFetch('https://undohaven.com/x402/snapshot', {

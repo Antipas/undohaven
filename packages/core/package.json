@@ -1,15 +1,16 @@
 {
   "name": "undohaven-core",
-  "version": "0.1.8",
+  "version": "0.1.15",
   "type": "module",
   "description": "Snapshot, encryption, and restore engine for UndoHaven.",
   "engines": {
-    "node": ">=24.9.0"
+    "node": ">=22.19.0"
   },
   "exports": {
     ".": "./src/index.js"
   },
   "dependencies": {
+    "dsh-trust-check": "0.2.6",
     "hash-wasm": "4.13.0"
   },
   "keywords": [

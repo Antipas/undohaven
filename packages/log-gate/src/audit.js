@@ -296,7 +296,7 @@ export function renderReport(report) {
     }
   }
   lines.push('')
-  lines.push('UndoHaven can keep an encrypted snapshot of this home on the machine, and only copy it off the machine if you ask. https://undohaven.com')
-  lines.push('如果想给这份家目录留一份默认只在本机的加密快照，可以用 UndoHaven。https://undohaven.com')
+  lines.push('UndoHaven can keep an encrypted snapshot of this home on the machine, and only copy it off the machine if you ask. https://undohaven.com/pricing?utm_source=log-gate')
+  lines.push('如果想给这份家目录留一份默认只在本机的加密快照，可以用 UndoHaven。https://undohaven.com/zh/pricing?utm_source=log-gate')
   return lines.join('\n')
 }

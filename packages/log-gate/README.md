@@ -53,7 +53,16 @@ dsh-log-gate audit
 dsh-log-gate audit --json
 ```
 
-报告列出官方会话日志开关、遥测相关的环境变量和补丁、本机目录大小，以及本地日志里越过最近一次 `delivery-accepted` 的后缀。最后有一句 UndoHaven 的说明和 https://undohaven.com 。
+报告列出官方会话日志开关、遥测相关的环境变量和补丁、本机目录大小，以及本地日志里越过最近一次 `delivery-accepted` 的后缀。最后有一句 UndoHaven 的说明和 https://undohaven.com/zh/pricing?utm_source=log-gate 。
+
+## Capabilities a trust scan will see
+
+dsh-log-gate is an unofficial third party, compatible with dsh, and not affiliated with DeepSeek.
+
+- **Network.** The settings tab calls only the same-origin routes `/api/log-gate/token` and `/api/log-gate/status`. The audit report prints `https://undohaven.com/pricing?utm_source=log-gate` as a link. The plugin does not request that host.
+- **Environment.** `dsh-log-gate audit` reads `DSH_HOME`, `DSH_AGENTS_HOME`, `DSH_TELEMETRY_DISABLED`, and `DSH_TELEMETRY_MODE`. The route token path can be overridden with `DSH_LOG_GATE_TOKEN_FILE`.
+- **Files.** The audit reads `cordis.patch.yml` under the dsh profiles directory and the local session logs under the dsh home. The route token file is mode `0600`. A browser call must send `x-undohaven-token`, and the `Origin` must be the loopback dsh host.
+- **Settings injection.** It registers one settings tab, `日志闸门 / Log gate`. It does not inject a system prompt and it does not override a `@deepseek-ai` bundle. `cordis.patch.yml` only inserts the `log-gate` row.
 
 ## 验证
 

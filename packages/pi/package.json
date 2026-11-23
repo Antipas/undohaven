@@ -1,0 +1,46 @@
+{
+  "name": "pi-undohaven",
+  "version": "0.1.2",
+  "type": "module",
+  "description": "Unofficial third-party encrypted snapshots for the pi coding agent. Not affiliated with pi's authors or DeepSeek.",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "pi-undohaven": "./bin/pi-undohaven.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "pi": {
+    "extensions": ["./extensions/index.js"]
+  },
+  "keywords": [
+    "pi-package",
+    "backup",
+    "snapshot",
+    "restore",
+    "encryption"
+  ],
+  "dependencies": {
+    "undohaven-core": "0.1.15"
+  },
+  "files": [
+    "bin",
+    "src",
+    "extensions",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "homepage": "https://undohaven.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Antipas/undohaven.git",
+    "directory": "packages/pi"
+  },
+  "bugs": {
+    "url": "https://github.com/Antipas/undohaven/issues",
+    "email": "support@undohaven.com"
+  }
+}

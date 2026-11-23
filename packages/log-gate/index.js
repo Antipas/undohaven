@@ -1,5 +1,8 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { decideBlock } from './src/match.js'
+import { authorize, ensureRouteToken, tokenBootstrapAllowed, TOKEN_HEADER } from './src/route-guard.js'
 
 export const name = 'log-gate'
 export const inject = ['sessionLogDeepSeek', 'sessions']
@@ -65,21 +68,46 @@ function jsonResponse(status, body) {
  * A webServer.register route on the same prefix can be dispatched first and
  * skip that admission. Missing fetch.register mounts nothing.
  */
-export function mount(connection, ctx, config) {
+export function tokenFile(env = process.env) {
+  return env.DSH_LOG_GATE_TOKEN_FILE || join(homedir(), '.dsh-log-gate-route-token')
+}
+
+export function mount(connection, ctx, config, env = process.env) {
   if (typeof connection?.fetch?.register !== 'function') return () => {}
-  const stop = connection.fetch.register({
-    path: '/api/log-gate/status',
-    methods: ['GET'],
-    requestBody: 'buffered',
-    fetch: async () => {
-      const live = typeof ctx.sessions?.list === 'function' ? ctx.sessions.list() : []
-      const rows = classifyLive(live, config)
-      return jsonResponse(200, { ...currentRules(config), sessions: rows, message: statusMessage(rows, config) })
-    },
+  const token = ensureRouteToken(tokenFile(env))
+  const denied = (code) => jsonResponse(403, {
+    error: code,
+    zh: code === 'cross_origin' ? '只接受 dsh 本机页面' : '缺少本机路由令牌',
+    en: code === 'cross_origin' ? 'Only the local dsh page may call this route' : 'The local route token is missing',
   })
+  const stops = [
+    connection.fetch.register({
+      path: '/api/log-gate/token',
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        if (!tokenBootstrapAllowed(request)) return denied('cross_origin')
+        return jsonResponse(200, { token, header: TOKEN_HEADER })
+      },
+    }),
+    connection.fetch.register({
+      path: '/api/log-gate/status',
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        const auth = authorize(request, token)
+        if (!auth.ok) return denied(auth.code)
+        const live = typeof ctx.sessions?.list === 'function' ? ctx.sessions.list() : []
+        const rows = classifyLive(live, config)
+        return jsonResponse(200, { ...currentRules(config), sessions: rows, message: statusMessage(rows, config) })
+      },
+    }),
+  ]
   return () => {
-    const result = stop?.()
-    if (result && typeof result.then === 'function') result.catch(() => {})
+    for (const stop of stops) {
+      const result = stop?.()
+      if (result && typeof result.then === 'function') result.catch(() => {})
+    }
   }
 }
 

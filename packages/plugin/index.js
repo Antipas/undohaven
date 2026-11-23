@@ -1,4 +1,6 @@
+import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
+import { authorize, ensureRouteToken, tokenBootstrapAllowed, TOKEN_HEADER } from './route-guard.js'
 import {
   cloudFromConfig,
   createSnapshot,
@@ -12,6 +14,10 @@ import {
   resolveDataDir,
   resolveDshHome,
   saveConfig,
+  pinSnapshot,
+  scanGuard,
+  uploadPendingLocal,
+  watchStorages,
 } from 'undohaven-core'
 import { publicKeyFields, establishKeys, unlockPassphrase } from 'undohaven-core'
 import { CloudClient } from 'undohaven-core'
@@ -78,6 +84,14 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
     },
     async boot() {
       const paths = runtime.paths()
+      try {
+        const { dek } = await loadDek(paths.dataDir)
+        if (!runtime.watch) {
+          runtime.watch = watchStorages({ ...paths, dek, pollMs: hooks.pollMs ?? 2000 })
+        }
+      } catch (error) {
+        runtime.lastError = error.message
+      }
       if (!read(config.snapshotOnStart, true)) return
       try {
         await loadDek(paths.dataDir)
@@ -107,6 +121,16 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
       })
       runtime.lastSnapshot = { id: snap.id, at: snap.createdAt }
       runtime.lastError = snap.cloudError ? String(snap.cloudError.message || snap.cloudError) : null
+      if (cloud) {
+        try {
+          const account = await cloud.account()
+          if (account.plan === 'pro' || account.features?.guardRealtime || account.features?.machineMigration) {
+            await uploadPendingLocal({ dataDir: paths.dataDir, cloud })
+          }
+        } catch {
+          /* the rolling snapshot is already local; cloud history waits for the next cadence */
+        }
+      }
       await reportAnonymousEvent(paths.dataDir, 'first_snapshot', null, paths.env).catch(() => {})
       if (runtime.lastError && /quota|容量/.test(runtime.lastError)) {
         await reportAnonymousEvent(paths.dataDir, 'limit_hit', { reason: 'snapshot' }, paths.env).catch(() => {})
@@ -125,6 +149,7 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
       runtime.timer.unref?.()
     },
     async shutdown() {
+      runtime.watch?.stop()
       if (runtime.timer) clearInterval(runtime.timer)
       if (!read(config.snapshotOnDispose, true)) return
       try {
@@ -144,16 +169,28 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
  */
 export function mount(connection, runtime) {
   if (typeof connection?.fetch?.register !== 'function') return () => {}
-  const route = (path, methods, requestBody, fetch) => connection.fetch.register({ path, methods, requestBody, fetch })
-  const guarded = (fetch) => async (request) => {
+  const token = ensureRouteToken(join(runtime.paths().dataDir, 'route-token'))
+  const route = (path, methods, requestBody, handle) => connection.fetch.register({ path, methods, requestBody, fetch: handle })
+  const denied = (code) => jsonResponse(403, {
+    error: code,
+    zh: code === 'cross_origin' ? '只接受 dsh 本机页面' : '缺少本机路由令牌',
+    en: code === 'cross_origin' ? 'Only the local dsh page may call this route' : 'The local route token is missing',
+  })
+  const guarded = (handle) => async (request) => {
+    const auth = authorize(request, token)
+    if (!auth.ok) return denied(auth.code)
     try {
-      return await fetch(request)
+      return await handle(request)
     } catch (error) {
       runtime.lastError = error.message
       return jsonResponse(error.status || 500, { error: error.code || 'error', zh: error.zh || error.message, en: error.en || error.message })
     }
   }
   const stops = [
+    route('/api/undohaven/token', ['GET'], 'buffered', async (request) => {
+      if (!tokenBootstrapAllowed(request)) return denied('cross_origin')
+      return jsonResponse(200, { token, header: TOKEN_HEADER })
+    }),
     route('/api/undohaven/status', ['GET'], 'buffered', guarded(async () => {
       const paths = runtime.paths()
       let unlocked = true
@@ -189,13 +226,22 @@ export function mount(connection, runtime) {
   })))
   stops.push(route('/api/undohaven/restore-plan', ['POST'], 'buffered', guarded(async (request) => {
     const body = await readJson(request)
-    const scope = ['sessions', 'storages', 'config', 'all'].includes(body.scope) ? body.scope : 'all'
+    const scope = ['sessions', 'storages', 'config', 'all', 'tasks', 'session'].includes(body.scope) ? body.scope : 'all'
     const id = String(body.id || '')
+    if (!/^[\w.-]+$/.test(id)) return jsonResponse(400, { error: 'bad_id', zh: '快照编号不合法', en: 'Snapshot id is not valid' })
+    let command = `undohaven restore --to ${id} --scope ${scope}`
+    if (scope === 'session') {
+      const session = String(body.session || '').trim()
+      if (!/^[\w.-]{1,128}$/.test(session)) {
+        return jsonResponse(400, { error: 'need_session', zh: '请提供会话编号', en: 'Pass a session id' })
+      }
+      command += ` --session ${session}`
+    }
     return jsonResponse(200, {
       blocked: true,
       zh: '恢复必须先退出 dsh。桌面端的紧急恢复可能会卸掉第三方插件，所以这一步交给独立命令。',
       en: 'Restore runs only after dsh has quit. Desktop fatal recovery can remove third-party plugins, so this step belongs to the standalone command.',
-      command: `undohaven restore --to ${id} --scope ${scope}`,
+      command,
     })
   })))
   stops.push(route('/api/undohaven/login/start', ['POST'], 'buffered', guarded(async (request) => {
@@ -264,9 +310,41 @@ export function mount(connection, runtime) {
   }
 }
 
+async function guardInstalled(runtime) {
+  const paths = runtime.paths()
+  let tier = 'free'
+  let dek = null
+  try {
+    const { cloud } = await cloudFromConfig(paths.dataDir)
+    if (cloud) {
+      const account = await cloud.account()
+      if (account.plan === 'pro' || account.features?.guardRealtime) tier = 'pro'
+    }
+  } catch {
+    tier = 'free'
+  }
+  if (tier === 'pro') {
+    try {
+      dek = (await loadDek(paths.dataDir)).dek
+    } catch {
+      tier = 'free'
+    }
+  }
+  await scanGuard({
+    tier,
+    apiBase: 'https://undohaven.com',
+    dataDir: paths.dataDir,
+    dshHome: paths.dshHome,
+    createSnapshot: dek ? (plugin) => createSnapshot({ ...paths, dek, kind: 'pre-change', tags: ['guard', plugin.name] }) : null,
+    pinSnapshot: dek ? (id) => pinSnapshot({ ...paths, dek }, id) : null,
+  })
+}
+
 export function apply(ctx, config) {
   const runtime = createRuntime(ctx, config)
-  const booting = runtime.boot()
+  const booting = runtime.boot().catch(() => {}).then(() => guardInstalled(runtime).catch((error) => {
+    runtime.lastError = error.message
+  }))
   runtime.startTimer()
   let unmount = () => {}
   const attach = (host) => {
