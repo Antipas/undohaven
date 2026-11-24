@@ -1,0 +1,51 @@
+{
+  "name": "opencode-undohaven",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Encrypted local snapshots and one-step undo for your OpenCode config, agents, commands and plugins. Unofficial third-party plugin, not affiliated with OpenCode.",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./server": "./src/index.js",
+    "./engine": "./src/engine.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.19.6",
+    "undohaven-core": "0.1.15"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "undo",
+    "snapshot",
+    "backup",
+    "restore",
+    "rollback",
+    "encryption",
+    "undohaven"
+  ],
+  "license": "MIT",
+  "homepage": "https://undohaven.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Antipas/undohaven.git",
+    "directory": "packages/opencode"
+  },
+  "bugs": {
+    "url": "https://github.com/Antipas/undohaven/issues",
+    "email": "support@undohaven.com"
+  }
+}
