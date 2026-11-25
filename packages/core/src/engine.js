@@ -70,6 +70,12 @@ function inScope(entry, scope, opts = {}) {
     const base = rel.split('/')[0]
     return !['sessions', 'storages', 'profiles', 'skills', 'attachments', 'cache'].includes(base)
   }
+  if (scope === 'overlay') {
+    if (entry.root !== 'dsh') return false
+    const prefix = typeof opts.prefix === 'string' ? opts.prefix : ''
+    if (prefix && !rel.startsWith(prefix)) return false
+    return true
+  }
   throw new HouhuiError('bad_scope', '范围只能是 sessions、storages、config、profile、tasks、session 或 all', 'Scope must be sessions, storages, config, profile, tasks, session, or all')
 }
 
@@ -557,7 +563,7 @@ export async function restoreSnapshot(opts) {
   if (scope === 'session' && selected.length === 0) {
     throw new HouhuiError('no_session', '这份快照里没有这个会话', `This snapshot has no session ${opts.session}`)
   }
-  if (scope !== 'session') {
+  if (scope !== 'session' && scope !== 'overlay') {
     await deleteExtras({ dsh: opts.dshHome, agents: opts.agentsHome }, manifest.entries, scope)
   }
   for (const entry of selected) {

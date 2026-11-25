@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+`undohaven guard update`, `guard uninstall`, `guard tree`, and `guard repair`. Update and uninstall snapshot the profile first and roll it back when pnpm fails. Repair restores a broken plugin tree from the latest good snapshot. Depends on undohaven-core 0.1.16.
+
 ## 0.1.14
 
 Plugin restore reads the plugin list from the encrypted manifest when the local record no longer carries it. Depends on undohaven-core 0.1.15.

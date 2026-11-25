@@ -152,4 +152,45 @@ test('client bundle registers a settings tab', async () => {
   assert.match(registered[0].label, /后悔药/)
   assert.match(code, /Restore only scheduled tasks/)
   assert.match(code, /Restore this session/)
+  assert.match(code, /ERR_PNPM_EPERM/)
+  assert.match(code, /包不可用/)
+  assert.match(code, /cannot resolve profile bundle/)
+})
+
+test('guard tree route names a dependency whose directory is gone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hhy-tree-'))
+  const dsh = join(root, 'dsh')
+  const data = join(root, 'data')
+  const profile = join(dsh, 'profiles', 'desktop')
+  await mkdir(join(profile, 'node_modules'), { recursive: true })
+  await mkdir(data, { recursive: true })
+  await writeFile(join(profile, 'package.json'), `${JSON.stringify({ dependencies: { 'dsh-music-panel': '0.46.0' } })}\n`)
+  await writeFile(join(profile, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n")
+  const ctx = { logger: { info() {}, warn() {}, error() {} }, connection: fakeConnection() }
+  const runtime = createRuntime(ctx, { snapshotOnStart: false, snapshotOnDispose: false }, {
+    dataDir: data,
+    dshHome: dsh,
+    agentsHome: join(root, 'agents'),
+    intervalMs: 10 ** 9,
+  })
+  mount(ctx.connection, runtime)
+  const tokenFile = join(data, 'route-token')
+  const token = (await readFile(tokenFile, 'utf8')).trim()
+  const response = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/guard/tree').fetch(new Request('http://127.0.0.1/api/undohaven/guard/tree', {
+    headers: { origin: 'http://127.0.0.1', [TOKEN_HEADER]: token },
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.broken[0].name, 'dsh-music-panel')
+  assert.match(body.zh, /包不可用/)
+  assert.match(body.en, /cannot resolve profile bundle/)
+  assert.equal(body.command, 'undohaven guard repair')
+  const plan = await ctx.connection.routes.find((route) => route.path === '/api/undohaven/guard/repair-plan').fetch(new Request('http://127.0.0.1/api/undohaven/guard/repair-plan', {
+    method: 'POST',
+    headers: { origin: 'http://127.0.0.1', [TOKEN_HEADER]: token },
+  }))
+  const planBody = await plan.json()
+  assert.match(planBody.en, /ERR_PNPM_EPERM/)
+  assert.match(planBody.command, /undohaven guard repair/)
+  await rm(root, { recursive: true, force: true })
 })

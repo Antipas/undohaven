@@ -16,6 +16,7 @@ import {
   saveConfig,
   pinSnapshot,
   scanGuard,
+  findBrokenTree,
   uploadPendingLocal,
   watchStorages,
 } from 'undohaven-core'
@@ -208,6 +209,7 @@ export function mount(connection, runtime) {
         lastSnapshot: runtime.lastSnapshot,
         lastError: runtime.lastError,
         upgrade: prompts.upgrade || null,
+        broken: runtime.brokenTree || [],
         zh: unlocked ? '已解锁' : '未解锁，先在这里或命令行登录',
         en: unlocked ? 'Unlocked' : 'Locked. Log in here or with the CLI',
       })
@@ -223,6 +225,34 @@ export function mount(connection, runtime) {
   stops.push(route('/api/undohaven/snapshot', ['POST'], 'buffered', guarded(async () => {
     const snap = await runtime.snapshot('manual')
     return jsonResponse(200, { ok: !snap.cloudError, id: snap.id, bytes: snap.bytes, cloud: snap.cloud, error: runtime.lastError })
+  })))
+  stops.push(route('/api/undohaven/guard/tree', ['GET'], 'buffered', guarded(async () => {
+    const paths = pathsOf()
+    const broken = await findBrokenTree(paths.dshHome)
+    runtime.brokenTree = broken
+    return jsonResponse(200, {
+      broken,
+      command: 'undohaven guard repair',
+      phrases: ['ERR_PNPM_EPERM', 'EPERM: operation not permitted, rename', '包不可用', 'cannot resolve profile bundle'],
+      zh: broken.length
+        ? '依赖还在 package.json 里，目录没了。插件页会显示「包不可用 / cannot resolve profile bundle」。这一步要退出 dsh，所以交给命令行：它会从最近一份好快照恢复。'
+        : '没有发现破树。',
+      en: broken.length
+        ? 'A dependency is still listed in package.json but the directory is gone. The plugin page shows "package unavailable" / "cannot resolve profile bundle". This step quits dsh, so the CLI restores the latest good snapshot.'
+        : 'No broken plugin tree.',
+    })
+  })))
+  stops.push(route('/api/undohaven/guard/repair-plan', ['POST'], 'buffered', guarded(async () => {
+    const paths = pathsOf()
+    const broken = await findBrokenTree(paths.dshHome)
+    runtime.brokenTree = broken
+    return jsonResponse(200, {
+      blocked: true,
+      broken,
+      command: 'undohaven guard repair',
+      zh: '恢复破树必须先退出 dsh。命令会停掉占用原生模块的宿主，从最近一份好快照写回，再启动。Windows 上失败原文是 ERR_PNPM_EPERM（EPERM: operation not permitted, rename）。',
+      en: 'Restoring a broken tree waits until dsh has quit. The command stops a host that holds a native module, writes the latest good snapshot back, and starts the host again. On Windows the failure text is ERR_PNPM_EPERM (EPERM: operation not permitted, rename).',
+    })
   })))
   stops.push(route('/api/undohaven/restore-plan', ['POST'], 'buffered', guarded(async (request) => {
     const body = await readJson(request)
@@ -338,6 +368,11 @@ async function guardInstalled(runtime) {
     createSnapshot: dek ? (plugin) => createSnapshot({ ...paths, dek, kind: 'pre-change', tags: ['guard', plugin.name] }) : null,
     pinSnapshot: dek ? (id) => pinSnapshot({ ...paths, dek }, id) : null,
   })
+  try {
+    runtime.brokenTree = await findBrokenTree(paths.dshHome)
+  } catch {
+    runtime.brokenTree = []
+  }
 }
 
 export function apply(ctx, config) {

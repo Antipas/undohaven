@@ -80,10 +80,25 @@ export {
   readBaseline,
   declaredFromManifest,
   listPluginHistory,
+  latestGoodSnapshotId,
+  markSnapshotTree,
   notePluginPoints,
   rollbackGuard,
   scanGuard,
 } from './guard.js'
+export {
+  GUARD_UPDATE_PHRASES,
+  createHostControl,
+  detectLockedNativeModules,
+  findBrokenTree,
+  guardPluginChange,
+  hostStopPlan,
+  isUpdateFailure,
+  listNativeModules,
+  pluginChangeArgs,
+  repairBrokenTree,
+  runtimePnpmStatus,
+} from './plugin-update.js'
 export {
   applyDisabledFlags,
   collectPluginState,

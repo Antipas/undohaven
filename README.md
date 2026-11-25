@@ -32,9 +32,9 @@ pi install npm:pi-undohaven
 
 Versions in this tree:
 
-- `packages/core` — `undohaven-core` 0.1.15
-- `packages/cli` — `undohaven` 0.1.14 (`npx undohaven` also works)
-- `packages/plugin` — `dsh-undohaven` 0.1.12
+- `packages/core` — `undohaven-core` 0.1.16
+- `packages/cli` — `undohaven` 0.1.15 (`npx undohaven` also works)
+- `packages/plugin` — `dsh-undohaven` 0.1.13
 - `packages/pi` — `pi-undohaven` 0.1.2
 - `packages/opencode` — `opencode-undohaven` 0.1.0
 - `packages/log-gate` — `dsh-log-gate` 0.1.7
@@ -42,6 +42,8 @@ Versions in this tree:
 `npx undohaven init` creates a local key and the first encrypted snapshot. Local snapshots need no account; keys stay on the machine. Compatibility declared in the dsh plugin packages: dsh `>=0.2.1-rc.5 <0.3.0`, Node.js `>=24.9`. `undohaven-core` and `pi-undohaven` also run on Node >= 22.19.
 
 When dsh will not start, `undohaven rescue` lists local snapshots and `undohaven rescue --to <id>` writes that profile's `package.json`, `pnpm-lock.yaml`, and `cordis.patch.yml` back. `undohaven guard history <plugin>` lists recorded points. Pro can run `undohaven guard rollback <plugin> --to <snapshot-or-version>` to put one package spec back.
+
+On Windows, a plugin-page update or uninstall can fail with `ERR_PNPM_EPERM` (`EPERM: operation not permitted, rename`) while the host has a native module mapped. The UI says `无法移除`. Nothing rolls back, so `package.json` still lists a directory that is gone and the plugin page shows `包不可用` / `cannot resolve profile bundle`. Pro Guard runs `undohaven guard update <plugin> --profile desktop` (and `undohaven guard uninstall`): it snapshots the profile first, stops that host, runs the update outside the host, and starts it again. A failure writes the snapshot back. `undohaven guard tree` lists the broken tree. `undohaven guard repair` restores the latest good snapshot. Same Guard plan, not a separate product. The desktop profile command `dsh plugin --profile desktop` answers `profile "desktop" is managed exclusively by the Electron application`, so Guard calls pnpm in the profile directory. Related public reports also show an empty `resources\runtime` (`Cannot find module` `pnpm.mjs`, `MODULE_NOT_FOUND`, `更新失败`, `operation-error`, `already-installed`) and `gateway/service-unavailable: typert gateway: session/create: active Service "sessionController" is unavailable`. UndoHaven is an unofficial third-party tool compatible with dsh. It is not affiliated with DeepSeek. https://github.com/deepseek-ai/deepseek-harness/discussions/14260 https://github.com/deepseek-ai/deepseek-harness/discussions/14216 https://github.com/deepseek-ai/deepseek-harness/discussions/14264
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs stay inside the encrypted manifest. The server can see the account id, optional display name, device id, device label, snapshot time, snapshot kind, dsh version, the credential flag, padded byte total, chunk count, manifest size, and HMAC chunk ids. It cannot see paths or per-file sizes (`packages/core/src/crypto.js`, `packages/core/src/byo.js`).
 
