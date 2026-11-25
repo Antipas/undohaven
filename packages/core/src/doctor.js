@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileLockHeld, portOpen } from './lock.js'
+import { findBrokenTree, runtimePnpmStatus } from './plugin-update.js'
 import { isSessionFile, isStraySessionsDir } from './scan.js'
 import { patchMountsRemovedTool } from './compat.js'
 import { inspectZstd, isZstd, readSessionHeader } from './session.js'
@@ -257,6 +258,30 @@ export async function doctor(dshHome, env = process.env) {
     if (onV4 || onV6) {
       const host = onV4 ? '127.0.0.1' : '::1'
       findings.push(finding('warn', 'dsh_running', `${host}:${port}`, `${port} 端口开着，桌面端可能在运行`, `Port ${port} is open. The desktop app may be running`))
+    }
+  }
+
+  const broken = await findBrokenTree(dshHome)
+  for (const item of broken) {
+    findings.push(finding(
+      'error',
+      'broken_plugin_tree',
+      `profiles/${item.profile}/node_modules/${item.name}`,
+      `依赖 ${item.name} 写在 package.json 里，目录却没有了。插件页会显示「包不可用 / cannot resolve profile bundle」。这常出现在 Windows 更新失败之后：ERR_PNPM_EPERM（EPERM: operation not permitted, rename），旧目录已删，没有回滚。若启动报 gateway/service-unavailable 或 sessionController" is unavailable，缺的插件目录也是公开报告里的一种原因。专业版 Guard：undohaven guard repair。`,
+      `Dependency ${item.name} is listed in package.json but the directory is gone. The plugin page shows "package unavailable" / "cannot resolve profile bundle". On Windows this follows a failed update: ERR_PNPM_EPERM (EPERM: operation not permitted, rename), the old directory is already gone, and nothing rolls back. If startup says gateway/service-unavailable or sessionController" is unavailable, a missing plugin directory is one cause reported in public threads. Guard on Pro: undohaven guard repair.`,
+    ))
+  }
+  const runtimeDir = env.UNDOHAVEN_DSH_RUNTIME
+  if (runtimeDir) {
+    const runtime = await runtimePnpmStatus(runtimeDir)
+    if (runtime?.missing) {
+      findings.push(finding(
+        'error',
+        'runtime_pnpm_missing',
+        runtime.entry,
+        '桌面端 resources\\runtime 里没有 pnpm 入口。插件安装、更新、卸载都会失败：Cannot find module ...\\pnpm.mjs（MODULE_NOT_FOUND）。界面往往只显示「更新失败」，日志是 operation-error，有时还会循环 already-installed。',
+        'The desktop resources\\runtime tree has no pnpm entry. Plugin install, update, and uninstall all fail: Cannot find module ...\\pnpm.mjs (MODULE_NOT_FOUND). The UI often says only "update failed"; the log says operation-error, and it can loop on already-installed.',
+      ))
     }
   }
 

@@ -35,6 +35,11 @@ import {
   scanGuard,
   rollbackGuard,
   listPluginHistory,
+  createHostControl,
+  findBrokenTree,
+  guardPluginChange,
+  repairBrokenTree,
+  GUARD_UPDATE_PHRASES,
   matchBlock,
   loadBlocklist,
   ROLLBACK_LIMIT,
@@ -733,9 +738,97 @@ async function cmdRescue(ctx, flags, positionals) {
   return 0
 }
 
+function guardHost(ctx) {
+  return createHostControl({ dshHome: ctx.dshHome, env: ctx.env })
+}
+
+async function guardKeys(ctx, tier) {
+  if (tier !== 'pro') return null
+  const keys = await loadDek(ctx.dataDir)
+  return keys.dek
+}
+
 async function cmdGuard(ctx, flags, positionals) {
   const action = positionals[0] || 'scan'
   const { tier, apiBase } = await guardTier(ctx)
+  if (action === 'tree') {
+    const broken = await findBrokenTree(ctx.dshHome, { profile: flags.profile })
+    const hint = 'ERR_PNPM_EPERM / EPERM: operation not permitted, rename / 包不可用 / cannot resolve profile bundle'
+    if (!broken.length) {
+      emit(ctx, {
+        text: bi(`没有破树。${hint}`, `No broken plugin tree. ${hint}`),
+        broken,
+        phrases: GUARD_UPDATE_PHRASES,
+      })
+      return 0
+    }
+    const lines = broken.map((item) => `${item.profile} ${item.name}@${item.spec || '?'} missing ${item.dir}`)
+    emit(ctx, {
+      text: bi(
+        `${lines.join('\n')}\n插件页会显示「包不可用 / cannot resolve profile bundle」。专业版：undohaven guard repair\n${hint}`,
+        `${lines.join('\n')}\nThe plugin page shows "package unavailable" / "cannot resolve profile bundle". Pro: undohaven guard repair\n${hint}`,
+      ),
+      broken,
+      phrases: GUARD_UPDATE_PHRASES,
+    })
+    return 1
+  }
+  if (action === 'repair') {
+    const dek = await guardKeys(ctx, tier)
+    const result = await repairBrokenTree({
+      tier,
+      dek,
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      env: ctx.env,
+      profile: flags.profile,
+      plugin: flags.plugin || positionals[1],
+      to: flags.to,
+      host: guardHost(ctx),
+    })
+    emit(ctx, {
+      text: result.restored
+        ? bi(`已从 ${result.snapshotId} 恢复破树。`, `Restored the broken tree from ${result.snapshotId}.`)
+        : bi('没有需要恢复的破树。', 'No broken plugin tree to restore.'),
+      ...result,
+    })
+    return result.ok ? 0 : 1
+  }
+  if (action === 'update' || action === 'uninstall' || action === 'remove') {
+    const name = positionals[1]
+    if (!name || name === true) {
+      throw new HouhuiError(
+        'need_plugin',
+        '用法：undohaven guard update <plugin> [--profile desktop] [--version x.y.z] | undohaven guard uninstall <plugin>',
+        'Usage: undohaven guard update <plugin> [--profile desktop] [--version x.y.z], or undohaven guard uninstall <plugin>',
+      )
+    }
+    const dek = await guardKeys(ctx, tier)
+    const result = await guardPluginChange({
+      tier,
+      dek,
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      env: ctx.env,
+      profile: flags.profile || 'desktop',
+      plugin: name,
+      spec: flags.version && flags.version !== true ? String(flags.version) : undefined,
+      action: action === 'update' ? 'update' : 'uninstall',
+      host: guardHost(ctx),
+    })
+    const locked = result.locked?.blocked ? ` ERR_PNPM_EPERM ${result.locked.modules.map((mod) => mod.name).join(', ')}` : ''
+    const verbZh = action === 'update' ? '更新' : '卸载'
+    const verbEn = action === 'update' ? 'Update' : 'Uninstall'
+    emit(ctx, {
+      text: result.ok
+        ? bi(`已${verbZh} ${name}。更新前快照 ${result.snapshotId}.${locked}`, `${verbEn} of ${name} finished. Pre-update snapshot ${result.snapshotId}.${locked}`)
+        : bi(`${verbZh}失败，已回滚到 ${result.snapshotId}。${result.install?.stderr || ''}${locked}`, `${verbEn} failed. Rolled back to ${result.snapshotId}. ${result.install?.stderr || ''}${locked}`),
+      ...result,
+    })
+    return result.ok ? 0 : 1
+  }
   if (action === 'block') {
     const spec = positionals[1] || ''
     const blocklist = await loadBlocklist({ apiBase, tier, dataDir: ctx.dataDir })
@@ -865,6 +958,10 @@ function help() {
     'undohaven plugins snapshot|restore|diff',
     'undohaven rescue [list] | undohaven rescue --to <id>',
     'undohaven guard scan|diff|history <plugin>|rollback <plugin> [--to <snapshot|version>]|block [name@version]',
+    'undohaven guard update <plugin> [--profile desktop] [--version x.y.z]',
+    'undohaven guard uninstall <plugin> [--profile desktop]',
+    'undohaven guard tree [--profile desktop]',
+    'undohaven guard repair [--plugin name] [--to <snapshot>] [--profile desktop]',
     'undohaven migrate-machine --to <id>',
     'undohaven upgrade <version>',
     'undohaven export --local <file>',

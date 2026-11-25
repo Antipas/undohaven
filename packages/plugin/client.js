@@ -34,6 +34,9 @@
         var sessionState = React.useState('')
         var sessionId = sessionState[0]
         var setSessionId = sessionState[1]
+        var brokenState = React.useState([])
+        var broken = brokenState[0]
+        var setBroken = brokenState[1]
         var token = ''
         function authHeaders(extra) {
           var headers = {}
@@ -57,10 +60,20 @@
             setSnapshots(body.snapshots || [])
           }).catch(function () { setSnapshots([]) })
         }
+        function refreshTree() {
+          return fetch('/api/undohaven/guard/tree', { headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
+            setBroken(body.broken || [])
+          }).catch(function () { setBroken([]) })
+        }
+        function planRepair() {
+          fetch('/api/undohaven/guard/repair-plan', { method: 'POST', headers: authHeaders() }).then(function (res) { return res.json() }).then(function (payload) {
+            setMessage((payload.zh || '') + ' ' + (payload.en || '') + ' ' + (payload.command || ''))
+          })
+        }
         React.useEffect(function () {
           fetch('/api/undohaven/token').then(function (res) { return res.json() }).then(function (body) {
             token = body.token || ''
-            return Promise.all([refresh(), refreshList()])
+            return Promise.all([refresh(), refreshList(), refreshTree()])
           }).catch(function (error) { setMessage(String(error.message || error)) })
         }, [])
 
@@ -140,6 +153,16 @@
           status && status.lastError ? React.createElement('p', null, status.lastError) : null,
           message ? React.createElement('p', null, message) : null,
           React.createElement('button', { type: 'button', disabled: busy, onClick: backup }, '立即备份 / Back up now'),
+          React.createElement('p', null, bi(
+            'Windows 上从插件页更新或卸载失败时，原文是 ERR_PNPM_EPERM（EPERM: operation not permitted, rename）。失败后不回滚，插件页显示「包不可用 / cannot resolve profile bundle」。Guard 在更新前拍快照，失败就写回。',
+            'When an update or uninstall from the plugin page fails on Windows, the text is ERR_PNPM_EPERM (EPERM: operation not permitted, rename). Nothing rolls back, and the plugin page shows "package unavailable" / "cannot resolve profile bundle". Guard snapshots before the update and writes that snapshot back if it fails.'
+          )),
+          React.createElement('button', { type: 'button', onClick: planRepair }, '恢复破树 / Restore broken tree'),
+          React.createElement('ul', null, (broken || []).length
+            ? broken.map(function (item) {
+              return React.createElement('li', { key: item.profile + ':' + item.name }, item.profile + ' ' + item.name + ' ' + (item.spec || '') + ' — 包不可用 / cannot resolve profile bundle')
+            })
+            : React.createElement('li', null, bi('没有破树', 'No broken plugin tree'))),
           React.createElement('ul', null, rows.length ? rows : React.createElement('li', null, bi('还没有快照', 'No snapshots yet'))),
           React.createElement('label', null, bi('会话编号', 'Session id'),
             React.createElement('input', { value: sessionId, onChange: function (event) { setSessionId(event.target.value) }, style: { display: 'block', width: '100%', marginTop: '4px' } })),

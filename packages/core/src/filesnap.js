@@ -10,7 +10,7 @@ import { HouhuiError } from './errors.js'
 import { safeJoin } from './paths.js'
 import { putLocalChunk, readLocalChunk, readSnapshotRecord, writeSnapshotRecord, listSnapshotRecords } from './store.js'
 
-const TOOL_VERSION = '0.1.15'
+const TOOL_VERSION = '0.1.16'
 
 async function piecesOf(abs) {
   const cdc = new CdcStream()

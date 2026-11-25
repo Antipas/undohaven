@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.16
+
+Guard snapshots a profile before a plugin update or uninstall. If that update fails, including Windows `ERR_PNPM_EPERM`, the profile is written back from the snapshot. A dependency listed in `package.json` with no directory can be restored from the latest good snapshot. When the host has a native module mapped, Guard stops the host, runs the update outside it, and starts the host again.
+
 ## 0.1.15
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs and the other metadata sit inside the manifest, which is padded to 64 KiB. The byte total sent with a snapshot is that padded size. Older unpadded manifests and older full index records still open.

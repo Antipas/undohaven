@@ -281,6 +281,36 @@ export async function listPluginHistory(dataDir, name) {
   return baseline.plugins?.[name]?.history || []
 }
 
+/** Mark history rows for one snapshot as a known-good profile tree. */
+export async function markSnapshotTree(dataDir, snapshotId, tree = 'good') {
+  if (!snapshotId) return 0
+  const baseline = await readBaseline(dataDir)
+  let marked = 0
+  for (const record of Object.values(baseline.plugins || {})) {
+    for (const item of record.history || []) {
+      if (item.snapshotId === snapshotId) {
+        item.tree = tree
+        marked += 1
+      }
+    }
+  }
+  if (marked) await writeJson(baselinePath(dataDir), baseline)
+  return marked
+}
+
+/** Newest history point whose tree was intact, for the named plugins. */
+export async function latestGoodSnapshotId(dataDir, names) {
+  const baseline = await readBaseline(dataDir)
+  const points = []
+  for (const name of names) {
+    const history = baseline.plugins?.[name]?.history || []
+    for (const item of history) points.push(item)
+  }
+  points.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+  const good = points.find((item) => item.tree === 'good' && item.snapshotId)
+  return good?.snapshotId || null
+}
+
 export async function notePluginPoints(dataDir, snapshotId, pluginState) {
   if (!snapshotId || !pluginState?.profiles) return []
   const baseline = await readBaseline(dataDir)

@@ -6,6 +6,8 @@ Library behind the `undohaven` CLI and the `dsh-undohaven` plugin. Unofficial th
 
 It chunks a dsh home, encrypts the chunks on the machine, and restores them. The passphrase never leaves the process. Publish and install the `undohaven` package if you want the command; this package is the engine those commands import.
 
+Guard on Pro can snapshot a profile before a plugin update. If pnpm fails with `ERR_PNPM_EPERM` (`EPERM: operation not permitted, rename`), the snapshot is written back. A dependency listed in `package.json` whose directory is gone (`包不可用` / `cannot resolve profile bundle`) restores from the latest good snapshot. When the host has a native module mapped, the update stops the host first. This is the existing Guard plan, not a separate product. UndoHaven is an unofficial third-party tool compatible with dsh. It is not affiliated with DeepSeek.
+
 Homepage: https://undohaven.com/
 
 ## dsh compatibility
