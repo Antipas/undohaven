@@ -139,6 +139,17 @@
           status && status.upgrade ? React.createElement('p', null, (status.upgrade.zh || '') + ' / ' + (status.upgrade.en || '') + ' https://undohaven.com/pricing?utm_source=plugin') : null,
           status && status.lastError ? React.createElement('p', null, status.lastError) : null,
           message ? React.createElement('p', null, message) : null,
+          React.createElement('p', null, bi(
+            '删除前多一层留底。不能保证每次误删都能找回来。命令是 /undohaven restore-deleted。',
+            'Extra backup layer before a delete. This does not guarantee every accidental delete can be restored. Command: /undohaven restore-deleted.'
+          )),
+          status && status.alignment && status.alignment.plugins && status.alignment.plugins.length ? React.createElement('p', null, (status.alignment.zh || '') + ' / ' + (status.alignment.en || '') + ' ' + status.alignment.plugins.map(function (plugin) { return plugin.name }).join(', ')) : null,
+          status && status.alignment && status.alignment.plugins && status.alignment.plugins.length ? React.createElement('button', { type: 'button', disabled: busy, onClick: function () {
+            setBusy(true)
+            fetch('/api/undohaven/align', { method: 'POST', headers: authHeaders() }).then(function (res) { return res.json() }).then(function (body) {
+              setMessage((body.zh || '') + ' / ' + (body.en || '') + ' ' + (body.snapshotId || ''))
+            }).finally(function () { setBusy(false) })
+          } }, '先快照再对齐 / Snapshot, then realign') : null,
           React.createElement('button', { type: 'button', disabled: busy, onClick: backup }, '立即备份 / Back up now'),
           React.createElement('ul', null, rows.length ? rows : React.createElement('li', null, bi('还没有快照', 'No snapshots yet'))),
           React.createElement('label', null, bi('会话编号', 'Session id'),

@@ -35,6 +35,16 @@ import {
   scanGuard,
   rollbackGuard,
   listPluginHistory,
+  listDeleted,
+  restoreDeleted,
+  confirmDelete,
+  setDeleteRetention,
+  DELETE_LAYER_COPY,
+  listRuntimeMismatch,
+  realignPlugins,
+  readAlignmentNotice,
+  ALIGN_COPY,
+  detectDshVersions,
   matchBlock,
   loadBlocklist,
   ROLLBACK_LIMIT,
@@ -44,6 +54,7 @@ import {
   diffPluginState,
   installProfile,
   loadPluginState,
+  loadState,
   restoreOnePlugin,
   restorePluginState,
   savePluginState,
@@ -845,6 +856,103 @@ async function cmdTrial(ctx) {
   return 0
 }
 
+async function cmdRestoreDeleted(ctx, flags, positionals) {
+  const action = positionals[0] || (flags.to ? 'restore' : 'list')
+  if (action === 'retain') {
+    const days = flags.days
+    const saved = await setDeleteRetention(ctx.dataDir, days)
+    emit(ctx, {
+      text: bi(`删除留底保留 ${saved.defaultDays} 天。${DELETE_LAYER_COPY.zh}`, `Delete copies are kept for ${saved.defaultDays} days. ${DELETE_LAYER_COPY.en}`),
+      ...saved,
+      layer: DELETE_LAYER_COPY,
+    })
+    return 0
+  }
+  if (action === 'confirm') {
+    const token = positionals[1] || flags.token
+    if (!token) throw new HouhuiError('need_token', '用法：undohaven restore-deleted confirm <确认码>', 'Usage: undohaven restore-deleted confirm <token>')
+    const confirmed = await confirmDelete(ctx.dataDir, String(token))
+    emit(ctx, {
+      text: bi(`已确认 ${confirmed.token}。这只是多一层留底。`, `Confirmed ${confirmed.token}. This is an extra backup layer.`),
+      ...confirmed,
+      layer: DELETE_LAYER_COPY,
+    })
+    return 0
+  }
+  if (action === 'list' || action === 'ls') {
+    const listed = await listDeleted({ dataDir: ctx.dataDir })
+    const lines = listed.entries.map((entry) => `${entry.createdAt}  ${entry.id}  ${entry.mode}  ${(entry.paths || []).map((item) => item.abs).join(', ')}`)
+    emit(ctx, {
+      text: `${lines.join('\n') || bi('还没有删除留底。', 'No delete copies yet.')}\n${DELETE_LAYER_COPY.zh}\n${DELETE_LAYER_COPY.en}`,
+      ...listed,
+      layer: DELETE_LAYER_COPY,
+    })
+    return 0
+  }
+  const id = flags.to || (action !== 'restore' ? action : positionals[1])
+  if (!id) throw new HouhuiError('need_target', '用法：undohaven restore-deleted --to <id>', 'Usage: undohaven restore-deleted --to <id>')
+  const dek = await ensureDek(ctx)
+  const restored = await restoreDeleted({
+    dataDir: ctx.dataDir,
+    dshHome: ctx.dshHome,
+    dek,
+    id,
+    dest: typeof flags.dest === 'string' ? flags.dest : null,
+  })
+  emit(ctx, {
+    text: bi(`已还原 ${restored.files.length} 个文件，来自 ${restored.id}。${DELETE_LAYER_COPY.zh}`, `Restored ${restored.files.length} files from ${restored.id}. ${DELETE_LAYER_COPY.en}`),
+    ...restored,
+    layer: DELETE_LAYER_COPY,
+  })
+  return 0
+}
+
+async function cmdAlign(ctx, flags) {
+  const versions = await detectDshVersions({ dshHome: ctx.dshHome, env: ctx.env })
+  const notice = await readAlignmentNotice(ctx.dataDir)
+  const runtimeVersion = (typeof flags.runtime === 'string' && flags.runtime) || notice?.runtimeVersion || (versions.dshVersion !== 'unknown' ? versions.dshVersion : versions.dshBaseVersion)
+  const state = await loadState(ctx.dataDir)
+  const previousVersion = (typeof flags.from === 'string' && flags.from) || notice?.previousVersion || state.previousDshVersion || null
+  if (flags.apply !== true && flags.apply !== 'true') {
+    const report = notice?.plugins ? notice : await listRuntimeMismatch({ dshHome: ctx.dshHome, runtimeVersion, previousVersion })
+    const lines = (report.plugins || []).map((plugin) => `${plugin.profile}  ${plugin.name}@${plugin.version}  ${plugin.reason}${plugin.canBump ? '  align' : '  manual'}`)
+    emit(ctx, {
+      text: `${ALIGN_COPY.zh}\n${ALIGN_COPY.en}\n${lines.join('\n') || bi('没有停用的插件。', 'No disabled plugins.')}`,
+      ...report,
+    })
+    return 0
+  }
+  const dek = await ensureDek(ctx)
+  const { cloud } = await cloudFor(ctx)
+  const result = await realignPlugins({
+    dshHome: ctx.dshHome,
+    dataDir: ctx.dataDir,
+    runtimeVersion,
+    previousVersion,
+    env: ctx.env,
+    createSnapshot: () => createSnapshot({
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      dek,
+      cloud,
+      env: ctx.env,
+      kind: 'pre-upgrade',
+      tags: ['guard', 'align'],
+      includeCredentials: false,
+    }),
+    install: (dir) => installProfile(dir, ctx.env),
+  })
+  emit(ctx, {
+    text: bi(
+      `已先做快照 ${result.snapshotId || '（没有需要升级的包）'}。${ALIGN_COPY.zh}`,
+      `Snapshotted first (${result.snapshotId || 'nothing to upgrade'}). ${ALIGN_COPY.en}`,
+    ),
+    ...result,
+  })
+  return 0
+}
+
 function help() {
   return [
     'UndoHaven / 后悔药',
@@ -864,7 +972,8 @@ function help() {
     'undohaven s3 keys create|list|revoke',
     'undohaven plugins snapshot|restore|diff',
     'undohaven rescue [list] | undohaven rescue --to <id>',
-    'undohaven guard scan|diff|history <plugin>|rollback <plugin> [--to <snapshot|version>]|block [name@version]',
+    'undohaven guard scan|diff|history <plugin>|rollback <plugin> [--to <snapshot|version>]|block [name@version]|align [--apply]',
+    'undohaven restore-deleted [list | --to <id> | confirm <token> | retain --days N]',
     'undohaven migrate-machine --to <id>',
     'undohaven upgrade <version>',
     'undohaven export --local <file>',
@@ -897,7 +1006,11 @@ export async function main(argv = process.argv) {
     if (command === 's3') return await cmdS3Keys(ctx, flags, positionals)
     if (command === 'plugins') return await cmdPlugins(ctx, flags, positionals)
     if (command === 'rescue') return await cmdRescue(ctx, flags, positionals)
-    if (command === 'guard') return await cmdGuard(ctx, flags, positionals)
+    if (command === 'guard') {
+      if (positionals[0] === 'align') return await cmdAlign(ctx, flags)
+      return await cmdGuard(ctx, flags, positionals)
+    }
+    if (command === 'restore-deleted') return await cmdRestoreDeleted(ctx, flags, positionals)
     if (command === 'trial') return await cmdTrial(ctx)
     if (command === 'startup') {
       const { cloud } = await cloudFor(ctx)

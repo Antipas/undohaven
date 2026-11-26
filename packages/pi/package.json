@@ -1,6 +1,6 @@
 {
   "name": "pi-undohaven",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Unofficial third-party encrypted snapshots for the pi coding agent. Not affiliated with pi's authors or DeepSeek.",
   "engines": {
@@ -23,7 +23,7 @@
     "encryption"
   ],
   "dependencies": {
-    "undohaven-core": "0.1.15"
+    "undohaven-core": "0.1.16"
   },
   "files": [
     "bin",

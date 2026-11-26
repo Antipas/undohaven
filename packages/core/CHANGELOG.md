@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.16
+
+Guard can refuse a recursive delete of a drive root, a home directory, or `.dsh`, and it checks that the assembled path still matches the original target. Other recursive deletes get an encrypted extra copy first. A directory over 500 MB is inventoried until someone confirms. `realignPlugins` snapshots, then updates runtime-locked plugin specs, and writes those specs back if the install fails.
+
 ## 0.1.15
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs and the other metadata sit inside the manifest, which is padded to 64 KiB. The byte total sent with a snapshot is that padded size. Older unpadded manifests and older full index records still open.

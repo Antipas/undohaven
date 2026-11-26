@@ -24,6 +24,8 @@ If dsh will not start, `undohaven rescue` lists local snapshots and `undohaven r
 
 `undohaven guard history <plugin>` lists every recorded point for that plugin. `undohaven guard rollback <plugin> --to <snapshot-or-version>` puts that one package spec back. Pro is required for rollback. A scan or diff prints the plugin's declared capabilities, including `dshhub.permissions.network`, and what changed since the previous version. UndoHaven is an unofficial third-party tool compatible with dsh. It is not affiliated with dsh's authors.
 
+`undohaven restore-deleted` lists an extra encrypted copy made before a recursive delete, and `undohaven restore-deleted --to <id>` writes that copy back. `undohaven guard align` names plugins a runtime change leaves disabled. `undohaven guard align --apply` snapshots first. This is an extra backup layer. It does not guarantee that every accidental delete can be restored.
+
 Losing both the passphrase and the recovery code means the encrypted copy cannot be opened. There is no reset.
 
 Homepage: https://undohaven.com/

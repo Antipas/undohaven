@@ -631,6 +631,8 @@ export async function pinSnapshot(opts, id) {
 export async function onRuntimeStart(opts) {
   const versions = await detectDshVersions({ dshHome: opts.dshHome, dshPrefix: opts.dshPrefix, env: opts.env })
   const state = await loadState(opts.dataDir)
+  const previousBaseVersion = state.lastBaseVersion || null
+  const previousDshVersion = state.lastDshVersion || null
   let prechange = null
   try {
     const { captureStorageChanges } = await import('./watch.js')
@@ -661,9 +663,14 @@ export async function onRuntimeStart(opts) {
   const hasDaily = rows.some((row) => row.kind === 'daily' && String(row.createdAt).startsWith(today))
   const kind = opts.kind || (hasDaily ? 'rolling' : 'daily')
   const snapshot = await createSnapshot({ ...opts, kind, tags: ['startup', kind] })
+  const runtimeChanged = Boolean(
+    (previousBaseVersion && previousBaseVersion !== versions.dshBaseVersion)
+    || (previousDshVersion && previousDshVersion !== versions.dshVersion),
+  )
   state.lastBaseVersion = versions.dshBaseVersion
+  state.lastDshVersion = versions.dshVersion
   await saveState(opts.dataDir, state)
-  return { snapshot, pinned, versions, versionSnapshot, prechange }
+  return { snapshot, pinned, versions, versionSnapshot, prechange, previousBaseVersion, previousDshVersion, runtimeChanged }
 }
 
 export async function exportArchive(file, opts) {
