@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+`undohaven restore-deleted` lists and restores an encrypted extra copy. `undohaven guard align` lists plugins the compatibility check disables after a runtime change, and `--apply` snapshots before upgrading them. Depends on undohaven-core 0.1.16.
+
 ## 0.1.14
 
 Plugin restore reads the plugin list from the encrypted manifest when the local record no longer carries it. Depends on undohaven-core 0.1.15.

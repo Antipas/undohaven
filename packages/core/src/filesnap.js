@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { createReadStream } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -10,7 +11,7 @@ import { HouhuiError } from './errors.js'
 import { safeJoin } from './paths.js'
 import { putLocalChunk, readLocalChunk, readSnapshotRecord, writeSnapshotRecord, listSnapshotRecords } from './store.js'
 
-const TOOL_VERSION = '0.1.15'
+const TOOL_VERSION = createRequire(import.meta.url)('../package.json').version
 
 async function piecesOf(abs) {
   const cdc = new CdcStream()

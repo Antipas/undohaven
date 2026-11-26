@@ -6,6 +6,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { establishKeys, listSnapshots } from 'undohaven-core'
 import { Config, createRuntime, mount } from '../index.js'
+import { attachSafety } from '../safety.js'
 import { TOKEN_HEADER } from '../route-guard.js'
 
 const PASSPHRASE = 'correct horse battery'
@@ -152,4 +153,49 @@ test('client bundle registers a settings tab', async () => {
   assert.match(registered[0].label, /后悔药/)
   assert.match(code, /Restore only scheduled tasks/)
   assert.match(code, /Restore this session/)
+  assert.match(code, /多一层留底/)
+  assert.match(code, /\/undohaven restore-deleted/)
+  assert.match(code, /does not guarantee every accidental delete/)
+  assert.doesNotMatch(code, /支付宝|微信支付|Alipay|WeChat Pay|百分百|完全防止/)
+})
+
+test('delete safety refuses a drive root and still lets the slash command list copies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hhy-safety-'))
+  const dsh = join(root, 'dsh')
+  const data = join(root, 'data')
+  await mkdir(dsh, { recursive: true })
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    on(event, handler, options) {
+      ctx.event = event
+      ctx.prepend = options?.prepend
+      ctx.handler = handler
+      return () => {}
+    },
+    tools: { guard(fn) { ctx.guard = fn; return () => {} } },
+    commands: { register(def) { ctx.command = def; return () => {} } },
+  }
+  const runtime = createRuntime(ctx, { snapshotOnStart: false }, {
+    dataDir: data,
+    dshHome: dsh,
+    env: { UNDOHAVEN_PLATFORM: 'win32', HOME: 'C:\\Users\\me', USERPROFILE: 'C:\\Users\\me' },
+  })
+  const detach = attachSafety(ctx, runtime)
+  assert.equal(ctx.event, 'tools/pre-execute')
+  assert.equal(ctx.prepend, true)
+  assert.equal(ctx.command.name, 'undohaven')
+  const next = []
+  const denied = await ctx.handler({ arguments: { command: 'rd /s /q E:\\' } }, async () => { next.push('next') })
+  assert.equal(denied.kind, 'deny')
+  assert.equal(next.length, 0)
+  assert.match(ctx.guard({ arguments: { command: 'rd /s /q E:\\' } }), /盘符|drive root/)
+  assert.equal(ctx.guard({ arguments: { command: 'ls' } }), undefined)
+  const listed = await ctx.command.handler({ rawInput: 'restore-deleted' })
+  assert.equal(listed.kind, 'success')
+  assert.match(listed.text, /多一层留底/)
+  assert.match(listed.text, /extra backup layer/i)
+  const help = await ctx.command.handler({ rawInput: '' })
+  assert.match(help.text, /Unofficial third-party/)
+  detach()
+  await rm(root, { recursive: true, force: true })
 })

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13
+
+`/undohaven restore-deleted` lists an extra encrypted copy taken before a recursive delete. A runtime change lists plugins the compatibility check disables and can snapshot before realigning them. Depends on undohaven-core 0.1.16.
+
 ## 0.1.12
 
 `auth.json`, `*.key`, `*.pem`, and `id_rsa` / `id_ed25519` are never part of a snapshot. `.env` and `.credentials.yaml` stay out unless credential backup is turned on. Depends on undohaven-core 0.1.15.

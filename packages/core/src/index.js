@@ -69,6 +69,34 @@ export { ANONYMOUS_FUNNEL, anonymousMeta, funnelOptedIn, limitNudgeLine, reportA
 export { readPaddedChunk, readSnapshotRecord } from './store.js'
 export { createFileSnapshot, listFileSnapshots, readFileManifest, restoreFileSnapshot } from './filesnap.js'
 export {
+  DELETE_BACKUP_MAX_BYTES,
+  DELETE_LAYER_COPY,
+  DEFAULT_RETAIN_DAYS,
+  confirmDelete,
+  deleteContext,
+  evaluateDeleteCommand,
+  guardDeleteCommand,
+  listDeleted,
+  normalizeDeletePath,
+  onPreExecute,
+  prepareRecursiveDelete,
+  readToolCommand,
+  restoreDeleted,
+  setDeleteRetention,
+} from './delete-guard.js'
+export {
+  ALIGN_COPY,
+  classifyPlugin,
+  clearAlignmentNotice,
+  compareVersions,
+  listRuntimeMismatch,
+  parseVersion,
+  rangeSatisfies,
+  readAlignmentNotice,
+  realignPlugins,
+  saveAlignmentNotice,
+} from './align.js'
+export {
   GUARD_SEED,
   ROLLBACK_LIMIT,
   diffCapabilities,

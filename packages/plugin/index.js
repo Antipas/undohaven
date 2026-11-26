@@ -21,6 +21,19 @@ import {
 } from 'undohaven-core'
 import { publicKeyFields, establishKeys, unlockPassphrase } from 'undohaven-core'
 import { CloudClient } from 'undohaven-core'
+import {
+  ALIGN_COPY,
+  DELETE_LAYER_COPY,
+  confirmDelete,
+  createSnapshot as createCoreSnapshot,
+  listDeleted,
+  loadDek as loadDataKey,
+  readAlignmentNotice,
+  realignPlugins,
+  restoreDeleted,
+} from 'undohaven-core'
+import { installProfile } from 'undohaven-core'
+import { attachSafety, noteRuntimeAlignment } from './safety.js'
 
 export const name = 'undohaven'
 export const inject = []
@@ -98,6 +111,9 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
         const { cloud } = await cloudFromConfig(paths.dataDir)
         const result = await onRuntimeStart({ ...paths, cloud })
         runtime.lastSnapshot = { id: result.snapshot.id, at: result.snapshot.createdAt, pinned: result.pinned?.id ?? null }
+        await noteRuntimeAlignment(runtime, result).catch((error) => {
+          runtime.lastError = error.message
+        })
         await reportAnonymousEvent(paths.dataDir, 'install', null, paths.env).catch(() => {})
         await reportAnonymousEvent(paths.dataDir, 'first_snapshot', null, paths.env).catch(() => {})
         if (result.snapshot.cloudError) runtime.lastError = String(result.snapshot.cloudError.message || result.snapshot.cloudError)
@@ -208,6 +224,8 @@ export function mount(connection, runtime) {
         lastSnapshot: runtime.lastSnapshot,
         lastError: runtime.lastError,
         upgrade: prompts.upgrade || null,
+        alignment: runtime.alignment || await readAlignmentNotice(paths.dataDir),
+        layer: DELETE_LAYER_COPY,
         zh: unlocked ? '已解锁' : '未解锁，先在这里或命令行登录',
         en: unlocked ? 'Unlocked' : 'Locked. Log in here or with the CLI',
       })
@@ -243,6 +261,51 @@ export function mount(connection, runtime) {
       en: 'Restore runs only after dsh has quit. Desktop fatal recovery can remove third-party plugins, so this step belongs to the standalone command.',
       command,
     })
+  })))
+  stops.push(route('/api/undohaven/deleted', ['GET'], 'buffered', guarded(async () => {
+    const listed = await listDeleted({ dataDir: pathsOf().dataDir })
+    return jsonResponse(200, { ...listed, layer: DELETE_LAYER_COPY })
+  })))
+  stops.push(route('/api/undohaven/restore-deleted', ['POST'], 'buffered', guarded(async (request) => {
+    const body = await readJson(request)
+    const paths = pathsOf()
+    const dek = (await loadDataKey(paths.dataDir)).dek
+    const restored = await restoreDeleted({ ...paths, dek, id: String(body.id || ''), deferInsideDsh: true })
+    if (restored.deferred) return jsonResponse(200, { deferred: true, ...restored, layer: DELETE_LAYER_COPY })
+    return jsonResponse(200, { ok: true, ...restored, layer: DELETE_LAYER_COPY })
+  })))
+  stops.push(route('/api/undohaven/deleted/confirm', ['POST'], 'buffered', guarded(async (request) => {
+    const body = await readJson(request)
+    const confirmed = await confirmDelete(pathsOf().dataDir, String(body.token || ''))
+    return jsonResponse(200, { ...confirmed, layer: DELETE_LAYER_COPY })
+  })))
+  stops.push(route('/api/undohaven/align', ['GET'], 'buffered', guarded(async () => {
+    const notice = runtime.alignment || await readAlignmentNotice(pathsOf().dataDir)
+    return jsonResponse(200, notice || { plugins: [], zh: ALIGN_COPY.zh, en: ALIGN_COPY.en })
+  })))
+  stops.push(route('/api/undohaven/align', ['POST'], 'buffered', guarded(async () => {
+    const paths = pathsOf()
+    const notice = runtime.alignment || await readAlignmentNotice(paths.dataDir)
+    if (!notice?.runtimeVersion) return jsonResponse(200, { ok: true, applied: false, plugins: [], zh: ALIGN_COPY.zh, en: ALIGN_COPY.en })
+    const dek = (await loadDataKey(paths.dataDir)).dek
+    const { cloud } = await cloudFromConfig(paths.dataDir)
+    const result = await realignPlugins({
+      dshHome: paths.dshHome,
+      dataDir: paths.dataDir,
+      runtimeVersion: notice.runtimeVersion,
+      previousVersion: notice.previousVersion,
+      createSnapshot: () => createCoreSnapshot({
+        ...paths,
+        dek,
+        cloud,
+        kind: 'pre-upgrade',
+        tags: ['guard', 'align'],
+        includeCredentials: false,
+      }),
+      install: (dir) => installProfile(dir, paths.env),
+    })
+    runtime.alignment = null
+    return jsonResponse(200, { ...result, zh: ALIGN_COPY.zh, en: ALIGN_COPY.en })
   })))
   stops.push(route('/api/undohaven/login/start', ['POST'], 'buffered', guarded(async (request) => {
     const body = await readJson(request)
@@ -342,6 +405,7 @@ async function guardInstalled(runtime) {
 
 export function apply(ctx, config) {
   const runtime = createRuntime(ctx, config)
+  const detachSafety = attachSafety(ctx, runtime) || (() => {})
   const booting = runtime.boot().catch(() => {}).then(() => guardInstalled(runtime).catch((error) => {
     runtime.lastError = error.message
   }))
@@ -353,6 +417,7 @@ export function apply(ctx, config) {
   if (typeof ctx.connection?.fetch?.register === 'function') attach(ctx)
   else if (typeof ctx.inject === 'function') ctx.inject(['connection'], (scoped) => attach(scoped))
   return async () => {
+    detachSafety()
     unmount()
     await booting
     await runtime.shutdown()
