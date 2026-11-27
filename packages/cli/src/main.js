@@ -35,6 +35,12 @@ import {
   scanGuard,
   rollbackGuard,
   listPluginHistory,
+  noteSessionFault,
+  repairSession,
+  undoSessionRepair,
+  inspectWipedProfiles,
+  listConfigVersions,
+  restoreProfileConfig,
   matchBlock,
   loadBlocklist,
   ROLLBACK_LIMIT,
@@ -785,6 +791,108 @@ async function cmdGuard(ctx, flags, positionals) {
     })
     return 0
   }
+  if (action === 'fault') {
+    const sessionId = flags.session || positionals[1]
+    const error = Array.isArray(flags.error) ? flags.error.at(-1) : flags.error
+    if (!sessionId || typeof error !== 'string') {
+      throw new HouhuiError('need_error', '用法：undohaven guard fault --session <id> --error <400 原文>', 'Usage: undohaven guard fault --session <id> --error <400 text>')
+    }
+    const report = await noteSessionFault(ctx.dataDir, { sessionId, error })
+    emit(ctx, {
+      text: report.poisoned
+        ? bi(`同一个位置已经连续 ${report.count} 次 400。可以 undohaven guard repair --session ${sessionId}`, `The same spot has returned 400, ${report.count} times in a row. You can run undohaven guard repair --session ${sessionId}`)
+        : bi('已记下这次 400。同一个位置再出现一次，就可以修复。', 'Noted this 400. One more at the same spot and it can be repaired.'),
+      ...report,
+      sample: undefined,
+    })
+    return 0
+  }
+  if (action === 'repair') {
+    const sessionId = flags.session || positionals[1]
+    if (!sessionId) throw new HouhuiError('need_session', '用法：undohaven guard repair --session <id> --error <400 原文>', 'Usage: undohaven guard repair --session <id> --error <400 text>')
+    const errors = flags.error ? (Array.isArray(flags.error) ? flags.error : [flags.error]) : []
+    for (const error of errors) {
+      if (typeof error !== 'string') continue
+      await noteSessionFault(ctx.dataDir, { sessionId, error })
+    }
+    let dek = null
+    if (tier === 'pro') dek = (await loadDek(ctx.dataDir)).dek
+    const result = await repairSession({
+      tier,
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      dek,
+      env: ctx.env,
+      sessionId,
+      force: flags.force === true || flags.force === 'true',
+    })
+    emit(ctx, {
+      text: bi(
+        `已先加密留底 ${result.snapshotId}，再处理会话 ${result.sessionId}（${result.action}）。撤销：undohaven guard undo`,
+        `Encrypted snapshot ${result.snapshotId} was taken before repairing session ${result.sessionId} (${result.action}). Undo: undohaven guard undo`,
+      ),
+      ...result,
+    })
+    return 0
+  }
+  if (action === 'undo') {
+    const dek = await ensureDek(ctx)
+    const result = await undoSessionRepair({
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      dek,
+      env: ctx.env,
+    })
+    emit(ctx, {
+      text: bi(`已用修复前的快照 ${result.snapshotId} 把会话 ${result.sessionId} 放回去。`, `Put session ${result.sessionId} back from the pre-repair snapshot ${result.snapshotId}.`),
+      ...result,
+    })
+    return 0
+  }
+  if (action === 'config') {
+    const found = await inspectWipedProfiles(ctx.dshHome)
+    const versions = await listConfigVersions(ctx.dataDir)
+    const lines = []
+    if (found.prompt) lines.push(found.prompt.zh, found.prompt.en, found.prompt.command)
+    for (const row of versions) lines.push(`${row.createdAt}  ${row.id}  ${(row.tags || []).join(',')}`)
+    emit(ctx, {
+      text: lines.join('\n') || bi('没有设置版本，也没有被移走的 profile。', 'No config versions, and no profile was moved aside.'),
+      wiped: found.profiles,
+      prompt: found.prompt,
+      versions,
+    })
+    return 0
+  }
+  if (action === 'config-restore') {
+    const profile = flags.profile || positionals[1]
+    if (!profile || profile === true) {
+      throw new HouhuiError('need_profile', '用法：undohaven guard config-restore --profile <name> [--item <id>] [--from bak|<snapshot>]', 'Usage: undohaven guard config-restore --profile <name> [--item <id>] [--from bak|<snapshot>]')
+    }
+    const items = flags.item ? (Array.isArray(flags.item) ? flags.item : [flags.item]).filter((item) => typeof item === 'string') : []
+    let dek = null
+    if (tier === 'pro') dek = (await loadDek(ctx.dataDir)).dek
+    const result = await restoreProfileConfig({
+      tier,
+      dataDir: ctx.dataDir,
+      dshHome: ctx.dshHome,
+      agentsHome: ctx.agentsHome,
+      dek,
+      env: ctx.env,
+      profile,
+      items,
+      from: typeof flags.from === 'string' ? flags.from : null,
+    })
+    emit(ctx, {
+      text: bi(
+        `已从 ${result.from} 还原 ${result.restored.join(', ') || '全部条目'}。还原前的快照是 ${result.snapshotId}。`,
+        `Restored ${result.restored.join(', ') || 'every entry'} from ${result.from}. The snapshot taken first is ${result.snapshotId}.`,
+      ),
+      ...result,
+    })
+    return 0
+  }
   if (action === 'diff' && tier !== 'pro') {
     throw new HouhuiError('pro_required', '能力差异是专业版功能。免费版仍有基线扫描和每周名单。https://undohaven.com/zh/pricing?utm_source=cli', 'Capability diff is a Pro feature. Free still has the baseline scan and the weekly blocklist. https://undohaven.com/pricing?utm_source=cli', { exitCode: 4 })
   }
@@ -865,6 +973,11 @@ function help() {
     'undohaven plugins snapshot|restore|diff',
     'undohaven rescue [list] | undohaven rescue --to <id>',
     'undohaven guard scan|diff|history <plugin>|rollback <plugin> [--to <snapshot|version>]|block [name@version]',
+    'undohaven guard fault --session <id> --error <400 text>',
+    'undohaven guard repair --session <id> [--error <400 text>] [--force]',
+    'undohaven guard undo',
+    'undohaven guard config',
+    'undohaven guard config-restore --profile <name> [--item <id>] [--from bak|<snapshot>]',
     'undohaven migrate-machine --to <id>',
     'undohaven upgrade <version>',
     'undohaven export --local <file>',

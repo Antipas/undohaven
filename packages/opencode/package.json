@@ -1,6 +1,6 @@
 {
   "name": "opencode-undohaven",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Encrypted local snapshots and one-step undo for your OpenCode config, agents, commands and plugins. Unofficial third-party plugin, not affiliated with OpenCode.",
   "main": "./src/index.js",
@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.19.6",
-    "undohaven-core": "0.1.15"
+    "undohaven-core": "0.1.16"
   },
   "keywords": [
     "opencode",

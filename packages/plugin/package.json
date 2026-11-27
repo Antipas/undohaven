@@ -1,6 +1,6 @@
 {
   "name": "dsh-undohaven",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "type": "module",
   "description": "dsh plugin that keeps rolling, daily, and pre-upgrade snapshots for UndoHaven.",
   "engines": {
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.19.0",
-    "undohaven-core": "0.1.15"
+    "undohaven-core": "0.1.16"
   },
   "keywords": [
     "dsh",

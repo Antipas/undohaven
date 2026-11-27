@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.16
+
+Guard can repair a session that keeps returning the same 400. Known cases are a lone UTF-16 surrogate, an interrupted reasoning-only assistant message, and a literal image token. Anything else rolls the log back to the event before that message. The session is encrypted into a snapshot first, and that snapshot can be restored in one step. A wiped `cordis.patch.yml` (empty `[]` beside a `.bak-*` file) is reported on startup. Each real change to that file keeps an encrypted version so one entry can be put back. Host rows from the backup are restored; third-party rows stay disabled.
+
 ## 0.1.15
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs and the other metadata sit inside the manifest, which is padded to 64 KiB. The byte total sent with a snapshot is that padded size. Older unpadded manifests and older full index records still open.

@@ -6,6 +6,8 @@ Unofficial third-party dsh plugin. Compatible with dsh. It is not an official ds
 
 It takes encrypted snapshots on start, on a timer, and when the plugin is disposed. While dsh is running it also watches `storages/*.json` and keeps the previous copy locally before the file is overwritten or deleted, so an archive that removes scheduled tasks still has a copy. It does not wait for a session-stop event. When the installed dsh version changes, startup also stores a snapshot of those storage files. The settings tab can show status, take a snapshot, and print a restore command for everything, for scheduled tasks only (`undohaven restore --to <id> --scope tasks`), or for one session (`undohaven restore --to <id> --scope session --session <id>`). Restore itself runs from the `undohaven` CLI after dsh has quit.
 
+On startup the tab also reports a profile whose `cordis.patch.yml` is the empty template `[]` next to a `cordis.patch.yml.bak-*` file, which is what the harness startup recovery button leaves behind. Each real change to that file is stored as an encrypted version. Repairing a session that will not open is `undohaven guard repair`, and `undohaven guard undo` puts that session back. Both run from the CLI after you quit dsh.
+
 Free keeps those copies on this machine. Pro, on the same account and the same prices, uploads them with the existing snapshot timer. `.env` and `.credentials.yaml` stay out unless you turn credential backup on. `auth.json`, `*.key`, `*.pem`, and private keys named `id_rsa` or `id_ed25519` are never included. `includesCredentials` defaults to false.
 
 ```bash

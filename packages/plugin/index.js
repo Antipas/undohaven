@@ -18,6 +18,8 @@ import {
   scanGuard,
   uploadPendingLocal,
   watchStorages,
+  watchProfiles,
+  rememberProfileWipe,
 } from 'undohaven-core'
 import { publicKeyFields, establishKeys, unlockPassphrase } from 'undohaven-core'
 import { CloudClient } from 'undohaven-core'
@@ -89,6 +91,14 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
         if (!runtime.watch) {
           runtime.watch = watchStorages({ ...paths, dek, pollMs: hooks.pollMs ?? 2000 })
         }
+        if (!runtime.profileWatch) {
+          runtime.profileWatch = watchProfiles({ ...paths, dek, pollMs: hooks.pollMs ?? 2000 })
+        }
+      } catch (error) {
+        runtime.lastError = error.message
+      }
+      try {
+        await rememberProfileWipe(paths)
       } catch (error) {
         runtime.lastError = error.message
       }
@@ -150,6 +160,7 @@ export function createRuntime(ctx, config = {}, hooks = {}) {
     },
     async shutdown() {
       runtime.watch?.stop()
+      runtime.profileWatch?.stop()
       if (runtime.timer) clearInterval(runtime.timer)
       if (!read(config.snapshotOnDispose, true)) return
       try {
@@ -208,6 +219,7 @@ export function mount(connection, runtime) {
         lastSnapshot: runtime.lastSnapshot,
         lastError: runtime.lastError,
         upgrade: prompts.upgrade || null,
+        profileWipe: prompts.profileWipe || null,
         zh: unlocked ? '已解锁' : '未解锁，先在这里或命令行登录',
         en: unlocked ? 'Unlocked' : 'Locked. Log in here or with the CLI',
       })
