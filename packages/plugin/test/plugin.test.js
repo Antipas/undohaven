@@ -113,6 +113,38 @@ test('plugin pins the previous runtime version and serves loopback routes', asyn
   await rm(root, { recursive: true, force: true })
 })
 
+test('startup prompts when the profile patch was moved aside', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hhy-wipe-'))
+  const dsh = join(root, 'dsh')
+  const data = join(root, 'data')
+  const profile = join(dsh, 'profiles', 'desktop')
+  await mkdir(profile, { recursive: true })
+  await writeFile(join(profile, 'cordis.patch.yml.bak-1730000000000'), '- id: locale\n  config:\n    preference: zh-CN\n')
+  await writeFile(join(profile, 'cordis.patch.yml'), '[]\n')
+  await establishKeys(data, PASSPHRASE)
+  const ctx = { logger: { info() {}, warn() {}, error() {} }, connection: fakeConnection() }
+  const runtime = createRuntime(ctx, { snapshotOnStart: false, snapshotOnDispose: false }, {
+    dataDir: data,
+    dshHome: dsh,
+    env: {},
+    pollMs: 10 ** 9,
+  })
+  await runtime.boot()
+  const prompts = JSON.parse(await readFile(join(data, 'prompts.json'), 'utf8'))
+  assert.match(prompts.profileWipe.zh, /你的设置被官方救援移走了/)
+  assert.match(prompts.profileWipe.command, /guard config-restore --profile desktop/)
+  mount(ctx.connection, runtime)
+  const statusRoute = ctx.connection.routes.find((route) => route.path === '/api/undohaven/status')
+  const token = (await readFile(join(data, 'route-token'), 'utf8')).trim()
+  const status = await statusRoute.fetch(new Request('http://127.0.0.1/api/undohaven/status', {
+    headers: { origin: 'http://127.0.0.1', 'x-undohaven-token': token },
+  }))
+  const body = await status.json()
+  assert.match(body.profileWipe.en, /unofficial third-party/i)
+  await runtime.shutdown()
+  await rm(root, { recursive: true, force: true })
+})
+
 test('client bundle registers a settings tab', async () => {
   const code = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   const registered = []
@@ -152,4 +184,5 @@ test('client bundle registers a settings tab', async () => {
   assert.match(registered[0].label, /后悔药/)
   assert.match(code, /Restore only scheduled tasks/)
   assert.match(code, /Restore this session/)
+  assert.match(code, /undohaven guard undo/)
 })

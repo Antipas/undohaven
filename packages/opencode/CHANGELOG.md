@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+Depends on undohaven-core 0.1.16. No OpenCode snapshot behavior change in this release.
+
 ## 0.1.0
 
 - First release. Tools `undohaven_snapshot`, `undohaven_list`, `undohaven_undo`.

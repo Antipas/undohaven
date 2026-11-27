@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+`undohaven guard repair` cleans a session that repeats the same 400, after an encrypted snapshot. `undohaven guard undo` puts that session back. `undohaven guard config` reports a profile the startup recovery button moved aside, and `config-restore` puts entries back. Depends on undohaven-core 0.1.16.
+
 ## 0.1.14
 
 Plugin restore reads the plugin list from the encrypted manifest when the local record no longer carries it. Depends on undohaven-core 0.1.15.

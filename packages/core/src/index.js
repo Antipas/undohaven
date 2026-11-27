@@ -46,6 +46,7 @@ export {
 export {
   createSnapshot,
   listSnapshots,
+  readSnapshotEntry,
   restoreSnapshot,
   pinSnapshot,
   onRuntimeStart,
@@ -94,3 +95,29 @@ export {
   restorePluginState,
   savePluginState,
 } from './plugins.js'
+export {
+  SESSION_FAULTS,
+  decodeSession,
+  encodeSession,
+  faultPlace,
+  findSessionLogs,
+  indexReplay,
+  noteSessionFault,
+  parseProviderError,
+  repairEvents,
+  repairSession,
+  repeatedFault,
+  undoSessionRepair,
+} from './session-repair.js'
+export {
+  applyConfigRestore,
+  captureProfileChanges,
+  inspectWipedProfiles,
+  isEmptyPatchTemplate,
+  listConfigVersions,
+  rememberProfileWipe,
+  restoreProfileConfig,
+  splitPatch,
+  watchProfiles,
+  wipePrompt,
+} from './profile-keep.js'

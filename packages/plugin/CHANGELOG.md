@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13
+
+Startup notices when `cordis.patch.yml` is an empty template beside a `.bak-*` file and shows that in the settings tab. While dsh is running, each real change to that file is kept as an encrypted version. The tab points at `undohaven guard repair` and `undohaven guard undo`. Depends on undohaven-core 0.1.16.
+
 ## 0.1.12
 
 `auth.json`, `*.key`, `*.pem`, and `id_rsa` / `id_ed25519` are never part of a snapshot. `.env` and `.credentials.yaml` stay out unless credential backup is turned on. Depends on undohaven-core 0.1.15.

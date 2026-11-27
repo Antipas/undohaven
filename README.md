@@ -32,16 +32,18 @@ pi install npm:pi-undohaven
 
 Versions in this tree:
 
-- `packages/core` — `undohaven-core` 0.1.15
-- `packages/cli` — `undohaven` 0.1.14 (`npx undohaven` also works)
-- `packages/plugin` — `dsh-undohaven` 0.1.12
-- `packages/pi` — `pi-undohaven` 0.1.2
-- `packages/opencode` — `opencode-undohaven` 0.1.0
+- `packages/core` — `undohaven-core` 0.1.16
+- `packages/cli` — `undohaven` 0.1.15 (`npx undohaven` also works)
+- `packages/plugin` — `dsh-undohaven` 0.1.13
+- `packages/pi` — `pi-undohaven` 0.1.3
+- `packages/opencode` — `opencode-undohaven` 0.1.1
 - `packages/log-gate` — `dsh-log-gate` 0.1.7
 
 `npx undohaven init` creates a local key and the first encrypted snapshot. Local snapshots need no account; keys stay on the machine. Compatibility declared in the dsh plugin packages: dsh `>=0.2.1-rc.5 <0.3.0`, Node.js `>=24.9`. `undohaven-core` and `pi-undohaven` also run on Node >= 22.19.
 
 When dsh will not start, `undohaven rescue` lists local snapshots and `undohaven rescue --to <id>` writes that profile's `package.json`, `pnpm-lock.yaml`, and `cordis.patch.yml` back. `undohaven guard history <plugin>` lists recorded points. Pro can run `undohaven guard rollback <plugin> --to <snapshot-or-version>` to put one package spec back.
+
+Pro Guard can also try a session that keeps failing with the same 400. `undohaven guard repair --session <id>` takes an encrypted snapshot of that session first. `undohaven guard undo` puts it back in one step. If the startup recovery button leaves `cordis.patch.yml` as `[]` beside a `.bak-*` file, startup asks before restoring: host settings come back, and third-party plugin rows stay disabled until you turn each one on. Copy for a later site page is in `docs/session-repair.md`. This is not a separate product.
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs stay inside the encrypted manifest. The server can see the account id, optional display name, device id, device label, snapshot time, snapshot kind, dsh version, the credential flag, padded byte total, chunk count, manifest size, and HMAC chunk ids. It cannot see paths or per-file sizes (`packages/core/src/crypto.js`, `packages/core/src/byo.js`).
 

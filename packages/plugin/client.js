@@ -137,6 +137,11 @@
           )),
           React.createElement('p', null, React.createElement('a', { href: 'https://undohaven.com/pricing?utm_source=plugin' }, 'Pro'), ' · ', React.createElement('a', { href: 'https://undohaven.com/zh/pricing?utm_source=plugin' }, '专业版')),
           status && status.upgrade ? React.createElement('p', null, (status.upgrade.zh || '') + ' / ' + (status.upgrade.en || '') + ' https://undohaven.com/pricing?utm_source=plugin') : null,
+          status && status.profileWipe ? React.createElement('p', null, (status.profileWipe.zh || '') + ' / ' + (status.profileWipe.en || '') + ' ' + (status.profileWipe.command || '')) : null,
+          React.createElement('p', null, bi(
+            '会话打不开时，退出 dsh 后运行 undohaven guard repair。修完可以 undohaven guard undo，一步放回去。',
+            'When a session will not open, quit dsh and run undohaven guard repair. undohaven guard undo puts that session back in one step.'
+          )),
           status && status.lastError ? React.createElement('p', null, status.lastError) : null,
           message ? React.createElement('p', null, message) : null,
           React.createElement('button', { type: 'button', disabled: busy, onClick: backup }, '立即备份 / Back up now'),

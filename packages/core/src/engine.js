@@ -459,6 +459,17 @@ async function readPlain(dataDir, entry, dek) {
   return bytes
 }
 
+export async function readSnapshotEntry(opts, id, rel) {
+  const { manifest, dek } = await materializeRecord(opts, id)
+  const root = opts.root || 'dsh'
+  const entry = manifest.entries.find((item) => item.rel === rel && item.root === root)
+    || manifest.entries.find((item) => item.rel === rel)
+  if (!entry) {
+    throw new HouhuiError('no_entry', `这份快照里没有 ${rel}`, `This snapshot has no ${rel}`)
+  }
+  return readPlain(opts.dataDir, entry, dek)
+}
+
 async function writeEntry(dataDir, entry, dek, roots) {
   const encKey = chunkEncKey(dek)
   const idKey = chunkIdKey(dek)
@@ -632,11 +643,21 @@ export async function onRuntimeStart(opts) {
   const versions = await detectDshVersions({ dshHome: opts.dshHome, dshPrefix: opts.dshPrefix, env: opts.env })
   const state = await loadState(opts.dataDir)
   let prechange = null
+  let profileKeep = null
+  let profileWipe = null
   try {
     const { captureStorageChanges } = await import('./watch.js')
     prechange = await captureStorageChanges({ ...opts, cloud: null, includeCredentials: false })
   } catch {
     prechange = null
+  }
+  try {
+    const keep = await import('./profile-keep.js')
+    profileKeep = await keep.captureProfileChanges({ ...opts, cloud: null, includeCredentials: false })
+    profileWipe = await keep.rememberProfileWipe({ dataDir: opts.dataDir, dshHome: opts.dshHome })
+  } catch {
+    profileKeep = null
+    profileWipe = null
   }
   let pinned = null
   let versionSnapshot = null
@@ -663,7 +684,7 @@ export async function onRuntimeStart(opts) {
   const snapshot = await createSnapshot({ ...opts, kind, tags: ['startup', kind] })
   state.lastBaseVersion = versions.dshBaseVersion
   await saveState(opts.dataDir, state)
-  return { snapshot, pinned, versions, versionSnapshot, prechange }
+  return { snapshot, pinned, versions, versionSnapshot, prechange, profileKeep, profileWipe }
 }
 
 export async function exportArchive(file, opts) {
