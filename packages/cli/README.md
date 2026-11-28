@@ -22,6 +22,8 @@ undohaven restore --to SNAPSHOT_ID --scope session --session SESSION_ID
 
 If dsh will not start, `undohaven rescue` lists local snapshots and `undohaven rescue --to SNAPSHOT_ID` writes that profile's `package.json`, `pnpm-lock.yaml`, and `cordis.patch.yml` back. It does not need dsh to be running. Quit dsh first if it is still up.
 
+`npx undohaven doctor` checks the profile when dsh itself will not start. The free command is read-only. `undohaven doctor repair` and `undohaven doctor undo` are part of Pro: repair encrypts a snapshot of the profile before it writes. See `docs/doctor.md`.
+
 `undohaven guard history <plugin>` lists every recorded point for that plugin. `undohaven guard rollback <plugin> --to <snapshot-or-version>` puts that one package spec back. Pro is required for rollback. A scan or diff prints the plugin's declared capabilities, including `dshhub.permissions.network`, and what changed since the previous version. UndoHaven is an unofficial third-party tool compatible with dsh. It is not affiliated with dsh's authors.
 
 Losing both the passphrase and the recovery code means the encrypted copy cannot be opened. There is no reset.

@@ -43,6 +43,8 @@ Versions in this tree:
 
 When dsh will not start, `undohaven rescue` lists local snapshots and `undohaven rescue --to <id>` writes that profile's `package.json`, `pnpm-lock.yaml`, and `cordis.patch.yml` back. `undohaven guard history <plugin>` lists recorded points. Pro can run `undohaven guard rollback <plugin> --to <snapshot-or-version>` to put one package spec back.
 
+`npx undohaven doctor` (and `undohaven doctor`) is a startup checkup that does not need dsh to be running. Without Pro it only reports. Pro repair takes an encrypted snapshot of the profile first; `undohaven doctor undo` writes that snapshot back. See `docs/doctor.md`.
+
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs stay inside the encrypted manifest. The server can see the account id, optional display name, device id, device label, snapshot time, snapshot kind, dsh version, the credential flag, padded byte total, chunk count, manifest size, and HMAC chunk ids. It cannot see paths or per-file sizes (`packages/core/src/crypto.js`, `packages/core/src/byo.js`).
 
 `auth.json`, `*.key`, `*.pem`, and private keys named `id_rsa` or `id_ed25519` are never included in a dsh snapshot. `.env` and `.credentials.yaml` stay out unless credential backup is turned on.

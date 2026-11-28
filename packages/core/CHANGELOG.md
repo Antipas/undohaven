@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+`startupCheckup`, `repairStartup`, and `undoStartupRepair` add the external startup checkup behind `undohaven doctor`. The version is unchanged.
+
 ## 0.1.15
 
 A bring-your-own index stores only the snapshot id, time, encrypted manifest, and chunk ids. Plugin specs and the other metadata sit inside the manifest, which is padded to 64 KiB. The byte total sent with a snapshot is that padded size. Older unpadded manifests and older full index records still open.
