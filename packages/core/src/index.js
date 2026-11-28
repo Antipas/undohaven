@@ -27,6 +27,14 @@ export { classifyDsh, classifyAgents, scanRoot, isSessionFile, isStraySessionsDi
 export { inspectZstd, repairZstd, repairJsonl, readSessionHeader, decompressZstdFrames } from './session.js'
 export { snapshotSqlite } from './sqlite.js'
 export { doctor } from './doctor.js'
+export {
+  OFFICIAL_BUNDLES,
+  DOCTOR_LINKS,
+  DOCTOR_QUOTES,
+  startupCheckup,
+  repairStartup,
+  undoStartupRepair,
+} from './startup-doctor.js'
 export { fileLockHeld, assertDshStopped, portOpen, windowsSessionSemaphoreName, textListsDshProcess } from './lock.js'
 export { detectDshVersions } from './versions.js'
 export { CloudClient } from './cloud.js'

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+`undohaven doctor` reports a read-only startup checkup. `undohaven doctor repair` and `undohaven doctor undo` are the Pro repair. The version is unchanged.
+
 ## 0.1.14
 
 Plugin restore reads the plugin list from the encrypted manifest when the local record no longer carries it. Depends on undohaven-core 0.1.15.

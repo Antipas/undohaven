@@ -7,6 +7,9 @@ import {
   cloudFromConfig,
   createSnapshot,
   doctor,
+  startupCheckup,
+  repairStartup,
+  undoStartupRepair,
   establishKeys,
   exportArchive,
   UPGRADE,
@@ -176,19 +179,113 @@ function emit(ctx, payload) {
   else console.log(payload.text)
 }
 
-async function cmdDoctor(ctx) {
-  const report = await doctor(ctx.dshHome)
+function doctorOpts(ctx, flags) {
+  return {
+    env: ctx.env,
+    runtimeFile: typeof flags.runtime === 'string' ? flags.runtime : undefined,
+    appRoot: typeof flags['app-root'] === 'string' ? flags['app-root'] : undefined,
+    appAsar: typeof flags['app-asar'] === 'string' ? flags['app-asar'] : undefined,
+    shippedVersion: typeof flags.release === 'string' ? flags.release : undefined,
+  }
+}
+
+function formatStartupFinding(item) {
+  const lines = [`[${item.level}] ${item.code} ${item.path}`, `  ${item.zh}`, `  ${item.en}`]
+  if (item.quote) lines.push(`  ${item.quote}`)
+  if (item.url) lines.push(`  ${item.url}`)
+  return lines.join('\n')
+}
+
+async function cmdDoctor(ctx, flags, positionals) {
+  const action = positionals[0] || 'check'
+  if (action === 'repair') return cmdDoctorRepair(ctx, flags)
+  if (action === 'undo') return cmdDoctorUndo(ctx, flags)
+  if (action !== 'check') {
+    throw new HouhuiError('bad_doctor', '用法：undohaven doctor [repair|undo]', 'Usage: undohaven doctor [repair|undo]')
+  }
+  const startup = await startupCheckup(ctx.dshHome, doctorOpts(ctx, flags))
+  const home = await doctor(ctx.dshHome, ctx.env)
+  const startupBom = new Set(startup.findings.filter((item) => item.code === 'utf8_bom').map((item) => item.path))
+  const homeFindings = home.findings.filter((item) => !(item.code === 'bom' && startupBom.has(item.path)))
+  const findings = [...startup.findings, ...homeFindings]
+  const errors = findings.filter((item) => item.level === 'error').length
+  const warnings = findings.filter((item) => item.level === 'warn').length
+  const report = {
+    dshHome: ctx.dshHome,
+    mode: 'read-only',
+    ok: errors === 0,
+    errors,
+    warnings,
+    findings,
+    shipped: startup.shipped,
+    notes: startup.notes,
+    profiles: startup.profiles,
+  }
   if (ctx.json) {
     console.log(JSON.stringify(report))
   } else {
-    console.log(bi(`检查 ${ctx.dshHome}`, `Checked ${ctx.dshHome}`))
-    if (report.findings.length === 0) console.log(bi('没有发现问题', 'No findings'))
-    for (const item of report.findings) {
-      console.log(`[${item.level}] ${item.code} ${item.path}\n  ${item.zh}\n  ${item.en}`)
+    console.log(bi(
+      `启动体检 ${ctx.dshHome}（只读，dsh 没启动也能跑）`,
+      `Startup checkup ${ctx.dshHome} (read-only, runs when dsh is not running)`,
+    ))
+    if (findings.length === 0) console.log(bi('没有发现问题', 'No findings'))
+    for (const item of findings) console.log(formatStartupFinding(item))
+    for (const note of startup.notes) {
+      console.log(`note ${note.code}\n  ${note.zh}\n  ${note.en}\n  ${note.quote}\n  ${note.url}`)
     }
-    console.log(bi(`${report.errors} 个错误，${report.warnings} 个警告`, `${report.errors} errors, ${report.warnings} warnings`))
+    console.log(bi(`${errors} 个错误，${warnings} 个警告`, `${errors} errors, ${warnings} warnings`))
+    if (errors > 0) {
+      console.log(bi(
+        '免费版只报告。Pro 可以 undohaven doctor repair，修复前会加密留底，之后 undohaven doctor undo。',
+        'The free checkup only reports. Pro can run undohaven doctor repair, which encrypts a snapshot first, then undohaven doctor undo.',
+      ))
+    }
   }
   return report.ok ? 0 : 1
+}
+
+async function cmdDoctorRepair(ctx, flags) {
+  const { tier } = await guardTier(ctx)
+  if (tier !== 'pro') {
+    await repairStartup({ tier, dshHome: ctx.dshHome, dataDir: ctx.dataDir, env: ctx.env })
+  }
+  const dek = await ensureDek(ctx)
+  const result = await repairStartup({
+    ...doctorOpts(ctx, flags),
+    tier,
+    dek,
+    dshHome: ctx.dshHome,
+    dataDir: ctx.dataDir,
+    install: flags['no-install'] === true || flags['no-install'] === 'true' ? false : undefined,
+  })
+  const summary = result.repaired
+    ? bi(
+      `已先加密留底 ${result.snapshotId}，再修复。撤销：undohaven doctor undo。半解压目录删了不会在撤销时放回来。`,
+      `Encrypted snapshot ${result.snapshotId} was taken before the repair. Undo: undohaven doctor undo. Removed half-extracted directories are not put back.`,
+    )
+    : bi('没有可以自动修的项目。', 'Nothing repairable was found.')
+  const detail = (result.actions || []).map((action) => `${action.action || 'action'} ${action.profile || ''} ${action.path || ''}`.trim())
+  const installs = (result.install || []).map((item) => `install ${item.profile}: ${item.installed ? 'ok' : item.reason}`)
+  const text = [summary, ...detail, ...installs].filter(Boolean).join('\n')
+  emit(ctx, { text, ...result, tier })
+  return result.repaired && result.errors > 0 ? 1 : 0
+}
+
+async function cmdDoctorUndo(ctx) {
+  const { tier } = await guardTier(ctx)
+  if (tier !== 'pro') {
+    await undoStartupRepair({ tier, dshHome: ctx.dshHome, dataDir: ctx.dataDir, env: ctx.env })
+  }
+  const dek = await ensureDek(ctx)
+  const result = await undoStartupRepair({
+    tier,
+    dek,
+    dshHome: ctx.dshHome,
+    dataDir: ctx.dataDir,
+    env: ctx.env,
+  })
+  emit(ctx, { text: bi(result.zh, result.en), ...result })
+  return 0
 }
 
 async function ensureDek(ctx) {
@@ -852,7 +949,7 @@ function help() {
     '默认只在本机做加密快照，不需要登录。 / Default is an encrypted local snapshot. No login.',
     '',
     'undohaven init',
-    'undohaven doctor',
+    'undohaven doctor [repair|undo] [--runtime file] [--app-root dir] [--release version] [--no-install]',
     'undohaven snapshot [--include-credentials] [--tag name]',
     'undohaven list',
     'undohaven restore --to <id> [--scope sessions|storages|config|tasks|session|all] [--session <id>] [--local <file>]',
@@ -884,7 +981,7 @@ export async function main(argv = process.argv) {
     if (command === 'funnel') return await cmdFunnel(ctx, positionals)
     await reportAnonymousEvent(ctx.dataDir, 'install', null, ctx.env).catch(() => {})
     if (command === 'init') return await cmdInit(ctx)
-    if (command === 'doctor') return await cmdDoctor(ctx)
+    if (command === 'doctor') return await cmdDoctor(ctx, flags, positionals)
     if (command === 'snapshot') return await cmdSnapshot(ctx, flags)
     if (command === 'list') return await cmdList(ctx, flags)
     if (command === 'restore') return await cmdRestore(ctx, flags)
